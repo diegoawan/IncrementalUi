@@ -1,36 +1,39 @@
-
 --[[
-    IncrementalUi v3.0
-    Advanced Edition
-    Original Luau UI Library
+    IncrementalUi v3.1 — Universal Edition
+    Advanced Luau UI Library (works in any Roblox game)
 
-    Features:
-    - Multiple independent windows
-    - White, Dark and Purple themes
-    - Custom theme editor
-    - Tab icons
-    - Search
-    - Animated tabs
-    - Stacked notifications
-    - Named configuration manager
-    - JSON config export/import
-    - Mobile-friendly layout
-    - Buttons, toggles, sliders
-    - Dropdowns, textboxes, keybinds
-
-    Requires a Roblox LocalScript environment.
+    Drop-in replacement for v3.0. Same API, safer internals.
+    Requires a LocalScript / Script-with-UI-access context.
 ]]
 
 local UI = {}
 
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local HttpService = game:GetService("HttpService")
+--==================================================
+-- SERVICES (safe lookup)
+--==================================================
+
+local function getService(name)
+    local ok, service = pcall(function()
+        return game:GetService(name)
+    end)
+    if ok and service then return service end
+    return nil
+end
+
+local Players     = getService("Players")
+local UIS         = getService("UserInputService")
+local TweenService = getService("TweenService")
+local HttpService  = getService("HttpService")
+local RunService   = getService("RunService")
+
+if not Players then
+    error("[IncrementalUi] Players service unavailable")
+end
 
 local Player = Players.LocalPlayer
+    or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
 
-UI.Version = "3.0.0"
+UI.Version = "3.1.0"
 UI.Windows = {}
 
 --==================================================
@@ -40,36 +43,34 @@ UI.Windows = {}
 UI.Themes = {
     White = {
         Background = Color3.fromRGB(245,245,248),
-        Sidebar = Color3.fromRGB(235,235,240),
-        Section = Color3.fromRGB(255,255,255),
-        Element = Color3.fromRGB(239,239,243),
-        Accent = Color3.fromRGB(90,90,100),
-        Text = Color3.fromRGB(35,35,42),
-        Muted = Color3.fromRGB(125,125,135),
-        Border = Color3.fromRGB(215,215,222)
+        Sidebar    = Color3.fromRGB(235,235,240),
+        Section    = Color3.fromRGB(255,255,255),
+        Element    = Color3.fromRGB(239,239,243),
+        Accent     = Color3.fromRGB(90,90,100),
+        Text       = Color3.fromRGB(35,35,42),
+        Muted      = Color3.fromRGB(125,125,135),
+        Border     = Color3.fromRGB(215,215,222),
     },
-
     Dark = {
         Background = Color3.fromRGB(20,20,25),
-        Sidebar = Color3.fromRGB(27,27,33),
-        Section = Color3.fromRGB(32,32,39),
-        Element = Color3.fromRGB(40,40,48),
-        Accent = Color3.fromRGB(150,150,165),
-        Text = Color3.fromRGB(245,245,250),
-        Muted = Color3.fromRGB(155,155,165),
-        Border = Color3.fromRGB(55,55,65)
+        Sidebar    = Color3.fromRGB(27,27,33),
+        Section    = Color3.fromRGB(32,32,39),
+        Element    = Color3.fromRGB(40,40,48),
+        Accent     = Color3.fromRGB(150,150,165),
+        Text       = Color3.fromRGB(245,245,250),
+        Muted      = Color3.fromRGB(155,155,165),
+        Border     = Color3.fromRGB(55,55,65),
     },
-
     Purple = {
         Background = Color3.fromRGB(22,20,30),
-        Sidebar = Color3.fromRGB(29,26,39),
-        Section = Color3.fromRGB(36,32,48),
-        Element = Color3.fromRGB(46,41,60),
-        Accent = Color3.fromRGB(155,115,255),
-        Text = Color3.fromRGB(245,240,255),
-        Muted = Color3.fromRGB(165,155,185),
-        Border = Color3.fromRGB(65,55,85)
-    }
+        Sidebar    = Color3.fromRGB(29,26,39),
+        Section    = Color3.fromRGB(36,32,48),
+        Element    = Color3.fromRGB(46,41,60),
+        Accent     = Color3.fromRGB(155,115,255),
+        Text       = Color3.fromRGB(245,240,255),
+        Muted      = Color3.fromRGB(165,155,185),
+        Border     = Color3.fromRGB(65,55,85),
+    },
 }
 
 --==================================================
@@ -78,79 +79,90 @@ UI.Themes = {
 
 local function new(class, props, parent)
     local object = Instance.new(class)
-
     for key, value in pairs(props or {}) do
         object[key] = value
     end
-
     object.Parent = parent
     return object
 end
 
 local function round(object, radius)
-    new("UICorner", {
-        CornerRadius = UDim.new(0, radius or 6)
+    return new("UICorner", {
+        CornerRadius = UDim.new(0, radius or 6),
     }, object)
 end
 
 local function outline(object, color)
-    return new("UIStroke", {
-        Color = color,
-        Thickness = 1
-    }, object)
+    return new("UIStroke", { Color = color, Thickness = 1 }, object)
 end
 
 local function animate(object, properties, duration)
-    local animation = TweenService:Create(
+    local tween = TweenService:Create(
         object,
         TweenInfo.new(duration or 0.18, Enum.EasingStyle.Quart),
         properties
     )
+    tween:Play()
+    return tween
+end
 
-    animation:Play()
-    return animation
+-- safe callback: one bad callback won't crash the UI
+local function safeCall(fn, ...)
+    if not fn then return end
+    task.spawn(function()
+        local ok, err = pcall(fn, ...)
+        if not ok then
+            warn("[IncrementalUi] Callback error: " .. tostring(err))
+        end
+    end)
 end
 
 local function makeLabel(parent, text, size, color)
     return new("TextLabel", {
         BackgroundTransparency = 1,
-        Size = size,
-        Text = text,
+        Size   = size,
+        Text   = text,
         TextColor3 = color,
-        Font = Enum.Font.Gotham,
+        Font   = Enum.Font.Gotham,
         TextSize = 12,
-        TextXAlignment = Enum.TextXAlignment.Left
+        TextXAlignment = Enum.TextXAlignment.Left,
     }, parent)
 end
 
 local function makeButton(parent, text, position, size, theme)
     local b = new("TextButton", {
-        Position = position or UDim2.new(),
-        Size = size or UDim2.new(1,0,1,0),
+        Position       = position or UDim2.new(),
+        Size           = size or UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = theme.Element,
-        Text = text,
-        TextColor3 = theme.Text,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 11,
+        Text           = text,
+        TextColor3     = theme.Text,
+        Font           = Enum.Font.GothamMedium,
+        TextSize       = 11,
         BorderSizePixel = 0,
-        AutoButtonColor = false
+        AutoButtonColor = false,
     }, parent)
-
     round(b, 5)
-
     b.MouseEnter:Connect(function()
-        animate(b, {
-            BackgroundColor3 = theme.Border
-        })
+        animate(b, { BackgroundColor3 = theme.Border })
     end)
-
     b.MouseLeave:Connect(function()
-        animate(b, {
-            BackgroundColor3 = theme.Element
-        })
+        animate(b, { BackgroundColor3 = theme.Element })
     end)
-
     return b
+end
+
+local function getPlayerGui()
+    local ok, pg = pcall(function()
+        return Player:WaitForChild("PlayerGui", 10)
+    end)
+    if ok and pg then return pg end
+    return Player:FindFirstChildOfClass("PlayerGui")
+end
+
+local function getViewport()
+    local cam = workspace.CurrentCamera
+    if cam then return cam.ViewportSize end
+    return Vector2.new(1280, 720)
 end
 
 --==================================================
@@ -163,215 +175,238 @@ function UI:CreateWindow(options)
     local themeName = options.Theme or "White"
     local theme = table.clone(self.Themes[themeName] or self.Themes.White)
 
-    local mobile = UIS.TouchEnabled
+    local mobile   = UIS.TouchEnabled and not UIS.KeyboardEnabled
+    local viewport = getViewport()
 
     local windowSize = options.Size or (
         mobile
-        and UDim2.new(0.94,0,0.75,0)
-        or UDim2.fromOffset(650,430)
+            and UDim2.new(0.94, 0, 0.75, 0)
+            or  UDim2.fromOffset(650, 430)
     )
 
+    local guiParent = getPlayerGui()
+    if not guiParent then
+        warn("[IncrementalUi] Could not locate PlayerGui")
+        return nil
+    end
+
     local gui = new("ScreenGui", {
-        Name = "IncrementalUi_" .. tostring(#self.Windows + 1),
-        ResetOnSpawn = false,
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    }, Player:WaitForChild("PlayerGui"))
+        Name            = "IncrementalUi_" .. tostring(#self.Windows + 1),
+        ResetOnSpawn    = false,
+        IgnoreGuiInset  = false,          -- respect topbar for universal placement
+        DisplayOrder    = 100,            -- above most game UIs
+        ZIndexBehavior  = Enum.ZIndexBehavior.Global,
+        Enabled         = options.Visible ~= false,
+    }, guiParent)
 
     local main = new("Frame", {
-        Name = "Main",
-        Size = windowSize,
-        AnchorPoint = Vector2.new(0.5,0.5),
-        Position = UDim2.fromScale(0.5,0.5),
+        Name             = "Main",
+        Size             = windowSize,
+        AnchorPoint      = Vector2.new(0.5, 0.5),
+        Position         = UDim2.fromScale(0.5, 0.5),
         BackgroundColor3 = theme.Background,
-        BorderSizePixel = 0,
-        ClipsDescendants = true
+        BorderSizePixel  = 0,
+        ClipsDescendants = true,
     }, gui)
-
     round(main, 9)
     outline(main, theme.Border)
 
+    --==================================================
+    -- CONNECTION TRACKING (prevents leaks)
+    --==================================================
+
+    local Window = {
+        Main           = main,
+        ScreenGui      = gui,
+        Tabs           = {},
+        ActiveTab      = nil,
+        Config         = {},
+        NamedConfigs   = {},
+        Controls       = {},
+        Theme          = theme,
+        ThemeName      = themeName,
+        Keybind        = options.Keybind or Enum.KeyCode.RightControl,
+        Destroyed      = false,
+        _connections   = {},
+        _activeDropdown = nil,
+    }
+
+    local function track(conn)
+        table.insert(Window._connections, conn)
+        return conn
+    end
+
+    local function closeDropdown()
+        if Window._activeDropdown and Window._activeDropdown.Parent then
+            Window._activeDropdown:Destroy()
+        end
+        Window._activeDropdown = nil
+    end
+
+    --==================================================
     -- HEADER
+    --==================================================
 
     local header = new("Frame", {
-        Size = UDim2.new(1,0,0,42),
+        Size             = UDim2.new(1, 0, 0, 42),
         BackgroundColor3 = theme.Sidebar,
-        BorderSizePixel = 0
+        BorderSizePixel  = 0,
     }, main)
 
     local title = makeLabel(
         header,
         options.Name or "IncrementalUi",
-        UDim2.new(1,-115,1,0),
+        UDim2.new(1, -115, 1, 0),
         theme.Text
     )
-
-    title.Position = UDim2.fromOffset(15,0)
-    title.Font = Enum.Font.GothamBold
+    title.Position = UDim2.fromOffset(15, 0)
+    title.Font     = Enum.Font.GothamBold
     title.TextSize = 14
 
-    local minimize = makeButton(
-        header, "−",
-        UDim2.new(1,-74,0,6),
-        UDim2.fromOffset(30,30), theme
-    )
+    local minimize = makeButton(header, "−",
+        UDim2.new(1, -74, 0, 6), UDim2.fromOffset(30, 30), theme)
+    local close = makeButton(header, "×",
+        UDim2.new(1, -38, 0, 6), UDim2.fromOffset(30, 30), theme)
 
-    local close = makeButton(
-        header, "×",
-        UDim2.new(1,-38,0,6),
-        UDim2.fromOffset(30,30), theme
-    )
+    --==================================================
+    -- DRAG (with viewport clamp)
+    --==================================================
 
-    -- DRAGGING
+    local dragging, dragInput, dragStart, startPosition = false, nil, nil, nil
 
-    local dragging = false
-    local dragInput
-    local dragStart
-    local startPosition
-
-    header.InputBegan:Connect(function(input)
+    track(header.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
-
-            dragging = true
-            dragInput = input
-            dragStart = input.Position
+            dragging    = true
+            dragInput   = input
+            dragStart   = input.Position
             startPosition = main.Position
+            closeDropdown()
         end
-    end)
+    end))
 
-    UIS.InputChanged:Connect(function(input)
-        if dragging and (
-            input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch
-        ) then
+    track(UIS.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement
+            and input.UserInputType ~= Enum.UserInputType.Touch then return end
 
-            local delta = input.Position - dragStart
+        local delta = input.Position - dragStart
+        local newPos = UDim2.new(
+            startPosition.X.Scale,
+            startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale,
+            startPosition.Y.Offset + delta.Y
+        )
 
-            main.Position = UDim2.new(
-                startPosition.X.Scale,
-                startPosition.X.Offset + delta.X,
-                startPosition.Y.Scale,
-                startPosition.Y.Offset + delta.Y
-            )
-        end
-    end)
+        -- Clamp so window never leaves viewport
+        local size = main.AbsoluteSize
+        local maxX = (viewport.X - size.X) / 2
+        local maxY = (viewport.Y - size.Y) / 2
+        newPos = UDim2.new(
+            newPos.X.Scale,
+            math.clamp(newPos.X.Offset, -maxX, maxX),
+            newPos.Y.Scale,
+            math.clamp(newPos.Y.Offset, -maxY, maxY)
+        )
+        main.Position = newPos
+    end))
 
-    UIS.InputEnded:Connect(function(input)
+    track(UIS.InputEnded:Connect(function(input)
         if input == dragInput then
-            dragging = false
+            dragging  = false
             dragInput = nil
         end
-    end)
+    end))
 
+    --==================================================
     -- SIDEBAR
+    --==================================================
 
     local sidebar = new("Frame", {
-        Position = UDim2.fromOffset(0,42),
-        Size = UDim2.new(0,145,1,-42),
+        Position         = UDim2.fromOffset(0, 42),
+        Size             = UDim2.new(0, 145, 1, -42),
         BackgroundColor3 = theme.Sidebar,
-        BorderSizePixel = 0
+        BorderSizePixel  = 0,
     }, main)
-
     new("UIListLayout", {
-        Padding = UDim.new(0,5),
-        SortOrder = Enum.SortOrder.LayoutOrder
+        Padding = UDim.new(0, 5),
+        SortOrder = Enum.SortOrder.LayoutOrder,
     }, sidebar)
-
     new("UIPadding", {
-        PaddingTop = UDim.new(0,10),
-        PaddingLeft = UDim.new(0,9),
-        PaddingRight = UDim.new(0,9)
+        PaddingTop  = UDim.new(0, 10),
+        PaddingLeft = UDim.new(0, 9),
+        PaddingRight= UDim.new(0, 9),
     }, sidebar)
 
+    --==================================================
     -- CONTENT
+    --==================================================
 
     local content = new("Frame", {
-        Position = UDim2.fromOffset(155,52),
-        Size = UDim2.new(1,-165,1,-62),
-        BackgroundTransparency = 1
+        Position = UDim2.fromOffset(155, 52),
+        Size     = UDim2.new(1, -165, 1, -62),
+        BackgroundTransparency = 1,
     }, main)
 
     local search = new("TextBox", {
-        Size = UDim2.new(1,-10,0,30),
-        Position = UDim2.fromOffset(5,0),
-        BackgroundColor3 = theme.Element,
-        Text = "",
-        PlaceholderText = "⌕  Search components...",
+        Size              = UDim2.new(1, -10, 0, 30),
+        Position          = UDim2.fromOffset(5, 0),
+        BackgroundColor3  = theme.Element,
+        Text              = "",
+        PlaceholderText   = "⌕  Search components...",
         PlaceholderColor3 = theme.Muted,
-        TextColor3 = theme.Text,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        ClearTextOnFocus = false,
-        BorderSizePixel = 0
+        TextColor3        = theme.Text,
+        Font              = Enum.Font.Gotham,
+        TextSize          = 11,
+        ClearTextOnFocus  = false,
+        BorderSizePixel   = 0,
     }, content)
-
-    round(search,5)
+    round(search, 5)
 
     local pages = new("Frame", {
-        Position = UDim2.fromOffset(0,38),
-        Size = UDim2.new(1,0,1,-38),
-        BackgroundTransparency = 1
+        Position = UDim2.fromOffset(0, 38),
+        Size     = UDim2.new(1, 0, 1, -38),
+        BackgroundTransparency = 1,
     }, content)
 
-    local Window = {
-        Main = main,
-        ScreenGui = gui,
-        Tabs = {},
-        ActiveTab = nil,
-        Config = {},
-        NamedConfigs = {},
-        Controls = {},
-        Theme = theme,
-        ThemeName = themeName,
-        Keybind = options.Keybind or Enum.KeyCode.RightControl,
-        Destroyed = false
-    }
-
-    table.insert(UI.Windows, Window)
-
     --==================================================
-    -- VISIBILITY
+    -- VISIBILITY / KEYBIND
     --==================================================
 
     local minimized = false
 
     function Window:SetVisible(value)
-        gui.Enabled = value == true
+        if gui.Parent then gui.Enabled = value == true end
     end
 
     function Window:SetKeybind(key)
-        if typeof(key) == "EnumItem"
-            and key.EnumType == Enum.KeyCode then
+        if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
             Window.Keybind = key
         end
     end
 
-    close.Activated:Connect(function()
+    track(close.Activated:Connect(function()
         gui:Destroy()
-    end)
+    end))
 
-    minimize.Activated:Connect(function()
+    track(minimize.Activated:Connect(function()
         minimized = not minimized
-
         sidebar.Visible = not minimized
         content.Visible = not minimized
-
         animate(main, {
             Size = minimized
-                and UDim2.new(windowSize.X.Scale,windowSize.X.Offset,0,42)
-                or windowSize
+                and UDim2.new(windowSize.X.Scale, windowSize.X.Offset, 0, 42)
+                or  windowSize,
         })
-    end)
+    end))
 
-    local keyConnection = UIS.InputBegan:Connect(function(input, processed)
-        if processed or UIS:GetFocusedTextBox() then
-            return
-        end
-
+    track(UIS.InputBegan:Connect(function(input)
         if input.KeyCode == Window.Keybind then
+            -- Only block if typing in a textbox
+            if UIS:GetFocusedTextBox() then return end
             gui.Enabled = not gui.Enabled
         end
-    end)
+    end))
 
     --==================================================
     -- THEME MANAGER
@@ -379,39 +414,29 @@ function UI:CreateWindow(options)
 
     function Window:SetTheme(name)
         local selected = UI.Themes[name]
-
-        if not selected then
-            return false
-        end
-
+        if not selected then return false end
         theme = table.clone(selected)
-        Window.Theme = theme
+        Window.Theme     = theme
         Window.ThemeName = name
-
         Window:RefreshTheme()
-
         return true
     end
 
     function Window:SetCustomTheme(custom)
-        if typeof(custom) ~= "table" then
-            return false
-        end
-
-        for key,value in pairs(custom) do
+        if typeof(custom) ~= "table" then return false end
+        for key, value in pairs(custom) do
             if typeof(theme[key]) == "Color3"
                 and typeof(value) == "Color3" then
                 theme[key] = value
             end
         end
-
         Window.Theme = theme
         Window:RefreshTheme()
-
         return true
     end
 
     function Window:RefreshTheme()
+        if not main.Parent then return end
         main.BackgroundColor3 = theme.Background
         header.BackgroundColor3 = theme.Sidebar
         sidebar.BackgroundColor3 = theme.Sidebar
@@ -419,7 +444,7 @@ function UI:CreateWindow(options)
         search.TextColor3 = theme.Text
         title.TextColor3 = theme.Text
 
-        for _,obj in ipairs(gui:GetDescendants()) do
+        for _, obj in ipairs(gui:GetDescendants()) do
             if obj:GetAttribute("UISection") then
                 obj.BackgroundColor3 = theme.Section
             elseif obj:GetAttribute("UIElement") then
@@ -433,7 +458,6 @@ function UI:CreateWindow(options)
             elseif obj:GetAttribute("UIText") then
                 obj.TextColor3 = theme.Text
             end
-
             if obj:IsA("UIStroke") then
                 obj.Color = theme.Border
             end
@@ -445,80 +469,65 @@ function UI:CreateWindow(options)
     --==================================================
 
     local notifications = {}
-    local notificationWidth = 270
+    local notificationWidth = math.min(270, viewport.X * 0.85)
 
     function Window:Notify(config)
         config = config or {}
+        if not gui.Parent then return end
 
         local notification = new("Frame", {
-            Size = UDim2.fromOffset(notificationWidth,72),
-            Position = UDim2.new(1,notificationWidth+20,1,-85),
+            Size             = UDim2.fromOffset(notificationWidth, 72),
+            Position         = UDim2.new(1, notificationWidth + 20, 1, -85),
             BackgroundColor3 = theme.Section,
-            BorderSizePixel = 0,
-            ZIndex = 30
-        },gui)
+            BorderSizePixel  = 0,
+            ZIndex           = 30,
+        }, gui)
+        notification:SetAttribute("UISection", true)
+        round(notification, 7)
+        outline(notification, theme.Border)
 
-        notification:SetAttribute("UISection",true)
-        round(notification,7)
-        outline(notification,theme.Border)
-
-        local heading = makeLabel(
-            notification,
+        local heading = makeLabel(notification,
             config.Title or "Notification",
-            UDim2.new(1,-20,0,25),
-            theme.Text
-        )
+            UDim2.new(1, -20, 0, 25), theme.Text)
+        heading.Position = UDim2.fromOffset(10, 5)
+        heading.Font     = Enum.Font.GothamBold
+        heading.ZIndex   = 31
+        heading:SetAttribute("UIText", true)
 
-        heading.Position = UDim2.fromOffset(10,5)
-        heading.Font = Enum.Font.GothamBold
-        heading.ZIndex = 31
-        heading:SetAttribute("UIText",true)
-
-        local description = makeLabel(
-            notification,
+        local description = makeLabel(notification,
             config.Content or "",
-            UDim2.new(1,-20,0,30),
-            theme.Muted
-        )
-
-        description.Position = UDim2.fromOffset(10,32)
+            UDim2.new(1, -20, 0, 30), theme.Muted)
+        description.Position = UDim2.fromOffset(10, 32)
         description.TextWrapped = true
         description.ZIndex = 31
 
-        table.insert(notifications,notification)
+        table.insert(notifications, notification)
 
         local function reposition()
-            for index,item in ipairs(notifications) do
+            for i, item in ipairs(notifications) do
                 if item.Parent then
-                    animate(item,{
-                        Position = UDim2.new(
-                            1,-notificationWidth-15,
-                            1,-85-(index-1)*80
-                        )
+                    animate(item, {
+                        Position = UDim2.new(1, -notificationWidth - 15, 1,
+                            -85 - (i - 1) * 80),
                     })
                 end
             end
         end
-
         reposition()
 
-        task.delay(config.Duration or 3,function()
+        task.delay(config.Duration or 3, function()
             if not notification.Parent then return end
-
-            animate(notification,{
-                Position = UDim2.new(1,notificationWidth+20,1,-85)
-            },0.2)
-
+            animate(notification, {
+                Position = UDim2.new(1, notificationWidth + 20, 1, -85),
+            }, 0.2)
             task.wait(0.25)
-
-            for index,item in ipairs(notifications) do
+            for i, item in ipairs(notifications) do
                 if item == notification then
-                    table.remove(notifications,index)
+                    table.remove(notifications, i)
                     break
                 end
             end
-
-            notification:Destroy()
+            if notification.Parent then notification:Destroy() end
             reposition()
         end)
 
@@ -534,56 +543,48 @@ function UI:CreateWindow(options)
     end
 
     function Window:ExportConfig()
-        return HttpService:JSONEncode(Window.Config)
+        local ok, result = pcall(function()
+            return HttpService:JSONEncode(Window.Config)
+        end)
+        return ok and result or "{}"
     end
 
     function Window:SaveConfig(name)
-        assert(type(name) == "string" and name ~= "",
-            "Config name required")
-
+        assert(type(name) == "string" and name ~= "", "Config name required")
         Window.NamedConfigs[name] = Window:GetConfig()
         return true
     end
 
     function Window:LoadConfig(data)
         if type(data) == "string" then
-            local success,result = pcall(function()
+            local ok, result = pcall(function()
                 return HttpService:JSONDecode(data)
             end)
-
-            if not success or type(result) ~= "table" then
+            if not ok or type(result) ~= "table" then
                 if Window.NamedConfigs[data] then
                     result = Window.NamedConfigs[data]
                 else
                     return false
                 end
             end
-
             data = result
         end
+        if type(data) ~= "table" then return false end
 
-        if type(data) ~= "table" then
-            return false
-        end
-
-        for id,value in pairs(data) do
+        for id, value in pairs(data) do
             local control = Window.Controls[id]
-
             if control and control.Set then
-                control.Set(value)
+                safeCall(control.Set, value)
             end
         end
-
         return true
     end
 
     function Window:GetConfigs()
         local names = {}
-
         for name in pairs(Window.NamedConfigs) do
-            table.insert(names,name)
+            table.insert(names, name)
         end
-
         table.sort(names)
         return names
     end
@@ -596,587 +597,422 @@ function UI:CreateWindow(options)
     -- SEARCH
     --==================================================
 
-    search:GetPropertyChangedSignal("Text"):Connect(function()
+    track(search:GetPropertyChangedSignal("Text"):Connect(function()
         local query = string.lower(search.Text)
-
-        for _,tab in ipairs(Window.Tabs) do
-            for _,section in ipairs(tab.Sections) do
+        for _, tab in ipairs(Window.Tabs) do
+            for _, section in ipairs(tab.Sections) do
                 local count = 0
-
-                for _,row in ipairs(section.Rows) do
+                for _, row in ipairs(section.Rows) do
                     local text = string.lower(
                         row:GetAttribute("SearchText") or ""
                     )
-
                     local matches = query == ""
-                        or string.find(text,query,1,true) ~= nil
-
+                        or string.find(text, query, 1, true) ~= nil
                     row.Visible = matches
-
-                    if matches then
-                        count += 1
-                    end
+                    if matches then count += 1 end
                 end
-
                 section.Frame.Visible = query == "" or count > 0
             end
         end
-    end)
+    end))
 
     --==================================================
     -- TAB CREATION
     --==================================================
 
-    function Window:CreateTab(name,icon)
+    function Window:CreateTab(name, icon)
         local tabButton = makeButton(
             sidebar,
-            (icon and (icon.."  ") or "")..name,
+            (icon and (icon .. "  ") or "") .. name,
             nil,
-            UDim2.new(1,0,0,34),
+            UDim2.new(1, 0, 0, 34),
             theme
         )
 
         local frame = new("ScrollingFrame", {
-            Size = UDim2.fromScale(1,1),
+            Size             = UDim2.fromScale(1, 1),
             BackgroundTransparency = 1,
-            BorderSizePixel = 0,
+            BorderSizePixel  = 0,
             ScrollBarThickness = 3,
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
-            CanvasSize = UDim2.new()
-        },pages)
-
+            CanvasSize       = UDim2.new(),
+            ScrollBarImageColor3 = theme.Border,
+        }, pages)
         frame.Visible = false
 
         new("UIListLayout", {
-            Padding = UDim.new(0,10),
-            SortOrder = Enum.SortOrder.LayoutOrder
-        },frame)
-
+            Padding   = UDim.new(0, 10),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }, frame)
         new("UIPadding", {
-            PaddingTop = UDim.new(0,5),
-            PaddingLeft = UDim.new(0,5),
-            PaddingRight = UDim.new(0,5),
-            PaddingBottom = UDim.new(0,10)
-        },frame)
+            PaddingTop    = UDim.new(0, 5),
+            PaddingLeft   = UDim.new(0, 5),
+            PaddingRight  = UDim.new(0, 5),
+            PaddingBottom = UDim.new(0, 10),
+        }, frame)
 
-        local Tab = {
-            Frame = frame,
-            Button = tabButton,
-            Sections = {}
-        }
+        local Tab = { Frame = frame, Button = tabButton, Sections = {} }
 
         function Tab:CreateSection(sectionName)
             local sectionFrame = new("Frame", {
-                Size = UDim2.new(1,-5,0,35),
+                Size             = UDim2.new(1, -5, 0, 35),
                 BackgroundColor3 = theme.Section,
-                BorderSizePixel = 0,
-                AutomaticSize = Enum.AutomaticSize.Y
-            },frame)
+                BorderSizePixel  = 0,
+                AutomaticSize    = Enum.AutomaticSize.Y,
+            }, frame)
+            sectionFrame:SetAttribute("UISection", true)
+            round(sectionFrame, 6)
+            outline(sectionFrame, theme.Border)
 
-            sectionFrame:SetAttribute("UISection",true)
-            round(sectionFrame,6)
-            outline(sectionFrame,theme.Border)
-
-            local heading = makeLabel(
-                sectionFrame,
-                sectionName,
-                UDim2.new(1,-20,0,30),
-                theme.Accent
-            )
-
-            heading.Position = UDim2.fromOffset(10,0)
-            heading.Font = Enum.Font.GothamBold
-            heading:SetAttribute("UIAccent",true)
+            local heading = makeLabel(sectionFrame,
+                sectionName, UDim2.new(1, -20, 0, 30), theme.Accent)
+            heading.Position = UDim2.fromOffset(10, 0)
+            heading.Font     = Enum.Font.GothamBold
+            heading:SetAttribute("UIAccent", true)
 
             local elements = new("Frame", {
-                Position = UDim2.fromOffset(8,32),
-                Size = UDim2.new(1,-16,0,0),
+                Position = UDim2.fromOffset(8, 32),
+                Size     = UDim2.new(1, -16, 0, 0),
                 BackgroundTransparency = 1,
-                AutomaticSize = Enum.AutomaticSize.Y
-            },sectionFrame)
-
+                AutomaticSize = Enum.AutomaticSize.Y,
+            }, sectionFrame)
             new("UIListLayout", {
-                Padding = UDim.new(0,7),
-                SortOrder = Enum.SortOrder.LayoutOrder
-            },elements)
-
+                Padding   = UDim.new(0, 7),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+            }, elements)
             new("UIPadding", {
-                PaddingBottom = UDim.new(0,9)
-            },elements)
+                PaddingBottom = UDim.new(0, 9),
+            }, elements)
 
-            local Section = {Rows = {}}
-
-            table.insert(Tab.Sections,{
+            local Section = { Rows = {} }
+            table.insert(Tab.Sections, {
                 Frame = sectionFrame,
-                Rows = Section.Rows
+                Rows  = Section.Rows,
             })
 
-            local function makeRow(height,name)
-                local row = new("Frame",{
-                    Size = UDim2.new(1,0,0,height or 32),
-                    BackgroundTransparency = 1
-                },elements)
-
-                row:SetAttribute("SearchText",name or "")
-                table.insert(Section.Rows,row)
-
+            local function makeRow(height, name)
+                local row = new("Frame", {
+                    Size = UDim2.new(1, 0, 0, height or 32),
+                    BackgroundTransparency = 1,
+                }, elements)
+                row:SetAttribute("SearchText", name or "")
+                table.insert(Section.Rows, row)
                 return row
             end
 
             -- BUTTON
-
             function Section:CreateButton(config)
                 config = config or {}
-
-                local row = makeRow(32,config.Name)
-
-                local b = makeButton(
-                    row,
-                    config.Name or "Button",
-                    nil,nil,theme
-                )
-
-                b:SetAttribute("UIElement",true)
-
-                b.Activated:Connect(function()
-                    if config.Callback then
-                        task.spawn(config.Callback)
-                    end
-                end)
-
+                local row = makeRow(32, config.Name)
+                local b = makeButton(row, config.Name or "Button", nil, nil, theme)
+                b:SetAttribute("UIElement", true)
+                track(b.Activated:Connect(function()
+                    safeCall(config.Callback)
+                end))
                 return b
             end
 
             -- TOGGLE
-
             function Section:CreateToggle(config)
                 config = config or {}
-
-                local id = config.ConfigKey
+                local id    = config.ConfigKey
                 local value = config.CurrentValue == true
 
-                local row = makeRow(32,config.Name)
+                local row   = makeRow(32, config.Name)
+                local titleL = makeLabel(row, config.Name or "Toggle",
+                    UDim2.new(1, -65, 1, 0), theme.Text)
+                titleL:SetAttribute("UIText", true)
 
-                local title = makeLabel(
-                    row,
-                    config.Name or "Toggle",
-                    UDim2.new(1,-65,1,0),
-                    theme.Text
-                )
+                local b = makeButton(row, "",
+                    UDim2.new(1, -42, 0.5, -10),
+                    UDim2.fromOffset(38, 20), theme)
+                b:SetAttribute("UIElement", true)
 
-                title:SetAttribute("UIText",true)
-
-                local b = makeButton(
-                    row,"",
-                    UDim2.new(1,-42,0.5,-10),
-                    UDim2.fromOffset(38,20),theme
-                )
-
-                b:SetAttribute("UIElement",true)
-
-                local dot = new("Frame",{
-                    Size = UDim2.fromOffset(14,14),
-                    Position = UDim2.fromOffset(3,3),
+                local dot = new("Frame", {
+                    Size = UDim2.fromOffset(14, 14),
+                    Position = UDim2.fromOffset(3, 3),
                     BackgroundColor3 = theme.Muted,
-                    BorderSizePixel = 0
-                },b)
+                    BorderSizePixel  = 0,
+                }, b)
+                round(dot, 4)
 
-                round(dot,4)
-
-                local function set(valueNew)
-                    value = valueNew == true
-
-                    b.BackgroundColor3 = value
-                        and theme.Accent or theme.Element
-
+                local function set(newValue)
+                    value = newValue == true
+                    b.BackgroundColor3 = value and theme.Accent or theme.Element
                     dot.Position = value
-                        and UDim2.new(1,-17,0,3)
-                        or UDim2.fromOffset(3,3)
-
-                    if id then
-                        Window.Config[id] = value
-                    end
-
-                    if config.Callback then
-                        task.spawn(config.Callback,value)
-                    end
+                        and UDim2.new(1, -17, 0, 3)
+                        or  UDim2.fromOffset(3, 3)
+                    if id then Window.Config[id] = value end
+                    safeCall(config.Callback, value)
                 end
 
-                b.Activated:Connect(function()
-                    set(not value)
-                end)
-
-                if id then
-                    Window.Controls[id] = {Set = set}
-                end
-
+                track(b.Activated:Connect(function() set(not value) end))
+                if id then Window.Controls[id] = { Set = set } end
                 set(value)
 
                 return {
                     SetValue = set,
-                    GetValue = function() return value end
+                    GetValue = function() return value end,
                 }
             end
 
             -- SLIDER
-
             function Section:CreateSlider(config)
                 config = config or {}
-
-                local min = config.Range and config.Range[1] or 0
-                local max = config.Range and config.Range[2] or 100
+                local min  = config.Range and config.Range[1] or 0
+                local max  = config.Range and config.Range[2] or 100
                 local step = config.Increment or 1
+                assert(max > min, "Invalid slider range")
+                assert(step > 0, "Slider increment must be positive")
 
-                assert(max > min,"Invalid slider range")
-                assert(step > 0,"Slider increment must be positive")
+                local id    = config.ConfigKey
+                local value = math.clamp(config.CurrentValue or min, min, max)
 
-                local id = config.ConfigKey
-                local value = math.clamp(config.CurrentValue or min,min,max)
+                local row   = makeRow(48, config.Name)
+                local titleL = makeLabel(row, config.Name or "Slider",
+                    UDim2.new(1, -65, 0, 20), theme.Text)
+                titleL:SetAttribute("UIText", true)
 
-                local row = makeRow(48,config.Name)
-
-                local title = makeLabel(
-                    row,
-                    config.Name or "Slider",
-                    UDim2.new(1,-65,0,20),
-                    theme.Text
-                )
-
-                title:SetAttribute("UIText",true)
-
-                local display = makeLabel(
-                    row,
-                    tostring(value),
-                    UDim2.fromOffset(65,20),
-                    theme.Accent
-                )
-
-                display.Position = UDim2.new(1,-65,0,0)
+                local display = makeLabel(row, tostring(value),
+                    UDim2.fromOffset(65, 20), theme.Accent)
+                display.Position = UDim2.new(1, -65, 0, 0)
                 display.TextXAlignment = Enum.TextXAlignment.Right
 
-                local bar = new("Frame",{
-                    Position = UDim2.fromOffset(0,29),
-                    Size = UDim2.new(1,0,0,7),
+                local bar = new("Frame", {
+                    Position = UDim2.fromOffset(0, 29),
+                    Size     = UDim2.new(1, 0, 0, 7),
                     BackgroundColor3 = theme.Element,
-                    BorderSizePixel = 0
-                },row)
+                    BorderSizePixel  = 0,
+                }, row)
+                round(bar, 5)
 
-                round(bar,5)
-
-                local fill = new("Frame",{
-                    Size = UDim2.new(0,0,1,0),
+                local fill = new("Frame", {
+                    Size = UDim2.new(0, 0, 1, 0),
                     BackgroundColor3 = theme.Accent,
-                    BorderSizePixel = 0
-                },bar)
-
-                round(fill,5)
+                    BorderSizePixel  = 0,
+                }, bar)
+                round(fill, 5)
 
                 local function set(newValue)
                     value = math.clamp(
-                        min + math.floor((newValue-min)/step+0.5)*step,
-                        min,max
-                    )
-
-                    fill.Size = UDim2.new(
-                        (value-min)/(max-min),0,1,0
-                    )
-
+                        min + math.floor((newValue - min) / step + 0.5) * step,
+                        min, max)
+                    fill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
                     display.Text = tostring(value)
-
-                    if id then
-                        Window.Config[id] = value
-                    end
-
-                    if config.Callback then
-                        task.spawn(config.Callback,value)
-                    end
+                    if id then Window.Config[id] = value end
+                    safeCall(config.Callback, value)
                 end
 
                 local active = false
-
                 local function update(input)
                     local percent = math.clamp(
-                        (input.Position.X-bar.AbsolutePosition.X)
-                        /bar.AbsoluteSize.X,0,1
-                    )
-
-                    set(min+(max-min)*percent)
+                        (input.Position.X - bar.AbsolutePosition.X)
+                        / bar.AbsoluteSize.X, 0, 1)
+                    set(min + (max - min) * percent)
                 end
 
-                bar.InputBegan:Connect(function(input)
+                track(bar.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1
                         or input.UserInputType == Enum.UserInputType.Touch then
                         active = true
                         update(input)
                     end
-                end)
-
-                UIS.InputChanged:Connect(function(input)
+                end))
+                track(UIS.InputChanged:Connect(function(input)
                     if active and (
                         input.UserInputType == Enum.UserInputType.MouseMovement
                         or input.UserInputType == Enum.UserInputType.Touch
-                    ) then
-                        update(input)
-                    end
-                end)
-
-                UIS.InputEnded:Connect(function(input)
+                    ) then update(input) end
+                end))
+                track(UIS.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1
                         or input.UserInputType == Enum.UserInputType.Touch then
                         active = false
                     end
-                end)
+                end))
 
-                if id then
-                    Window.Controls[id] = {Set = set}
-                end
-
+                if id then Window.Controls[id] = { Set = set } end
                 set(value)
 
                 return {
                     SetValue = set,
-                    GetValue = function() return value end
+                    GetValue = function() return value end,
                 }
             end
 
-            -- DROPDOWN
-
+            -- DROPDOWN (reparented to main for correct Z-index)
             function Section:CreateDropdown(config)
                 config = config or {}
+                local choices   = config.Options or {}
+                local selected  = config.CurrentOption or choices[1]
+                local id        = config.ConfigKey
 
-                local choices = config.Options or {}
-                local selected = config.CurrentOption or choices[1]
-                local id = config.ConfigKey
+                local row    = makeRow(32, config.Name)
+                local titleL = makeLabel(row, config.Name or "Dropdown",
+                    UDim2.new(0.4, 0, 1, 0), theme.Text)
+                titleL:SetAttribute("UIText", true)
 
-                local row = makeRow(32,config.Name)
+                local b = makeButton(row,
+                    tostring(selected or "Select") .. "  ▾",
+                    UDim2.new(0.42, 0, 0, 0),
+                    UDim2.new(0.58, 0, 1, 0), theme)
+                b:SetAttribute("UIElement", true)
 
-                local title = makeLabel(
-                    row,
-                    config.Name or "Dropdown",
-                    UDim2.new(0.4,0,1,0),
-                    theme.Text
-                )
+                local menu, opened = nil, false
 
-                title:SetAttribute("UIText",true)
-
-                local b = makeButton(
-                    row,
-                    tostring(selected or "Select").."  ▾",
-                    UDim2.new(0.42,0,0,0),
-                    UDim2.new(0.58,0,1,0),
-                    theme
-                )
-
-                b:SetAttribute("UIElement",true)
-
-                local menu
-                local opened = false
-
-                local function set(option)
-                    if not table.find(choices,option) then
-                        return
-                    end
-
-                    selected = option
-                    b.Text = tostring(option).."  ▾"
-
-                    if id then
-                        Window.Config[id] = option
-                    end
-
-                    if config.Callback then
-                        task.spawn(config.Callback,option)
-                    end
-
-                    if menu then
-                        menu:Destroy()
-                        menu = nil
-                    end
-
+                local function closeMenu()
+                    if menu and menu.Parent then menu:Destroy() end
+                    menu = nil
                     opened = false
+                    if Window._activeDropdown == menu then
+                        Window._activeDropdown = nil
+                    end
                 end
 
-                b.Activated:Connect(function()
-                    opened = not opened
+                local function set(option)
+                    if not table.find(choices, option) then return end
+                    selected = option
+                    b.Text = tostring(option) .. "  ▾"
+                    if id then Window.Config[id] = option end
+                    safeCall(config.Callback, option)
+                    closeMenu()
+                end
 
-                    if not opened then
-                        if menu then menu:Destroy() menu = nil end
-                        return
-                    end
+                track(b.Activated:Connect(function()
+                    if opened then closeMenu() return end
+                    closeDropdown()  -- close any other open dropdown
 
-                    menu = new("ScrollingFrame",{
-                        Position = UDim2.new(0,0,1,3),
-                        Size = UDim2.new(1,0,0,math.min(#choices*29,145)),
+                    local mainPos = main.AbsolutePosition
+                    local rowPos  = row.AbsolutePosition
+                    local rowSize = row.AbsoluteSize
+
+                    menu = new("ScrollingFrame", {
+                        Position = UDim2.fromOffset(
+                            rowPos.X - mainPos.X,
+                            rowPos.Y - mainPos.Y + rowSize.Y + 3),
+                        Size = UDim2.new(
+                            0, rowSize.X,
+                            0, math.min(#choices * 29, 145)),
                         BackgroundColor3 = theme.Section,
-                        BorderSizePixel = 0,
+                        BorderSizePixel  = 0,
                         ScrollBarThickness = 3,
-                        CanvasSize = UDim2.new(0,0,0,#choices*29),
-                        ZIndex = 10
-                    },row)
+                        CanvasSize       = UDim2.new(0, 0, 0, #choices * 29),
+                        ZIndex           = 999,
+                    }, main)
+                    round(menu, 5)
+                    outline(menu, theme.Border)
+                    new("UIListLayout", { Padding = UDim.new(0, 2) }, menu)
 
-                    round(menu,5)
-                    outline(menu,theme.Border)
-
-                    new("UIListLayout",{
-                        Padding = UDim.new(0,2)
-                    },menu)
-
-                    for _,option in ipairs(choices) do
-                        local item = new("TextButton",{
-                            Size = UDim2.new(1,-6,0,27),
+                    for _, option in ipairs(choices) do
+                        local item = new("TextButton", {
+                            Size = UDim2.new(1, -6, 0, 27),
                             BackgroundColor3 = theme.Element,
                             Text = tostring(option),
                             TextColor3 = theme.Text,
                             Font = Enum.Font.Gotham,
                             TextSize = 11,
                             BorderSizePixel = 0,
-                            ZIndex = 11
-                        },menu)
-
-                        item.Activated:Connect(function()
-                            set(option)
-                        end)
+                            ZIndex = 1000,
+                        }, menu)
+                        item.Activated:Connect(function() set(option) end)
                     end
-                end)
 
-                if id then
-                    Window.Controls[id] = {Set = set}
-                end
+                    opened = true
+                    Window._activeDropdown = menu
+                end))
+
+                if id then Window.Controls[id] = { Set = set } end
 
                 return {
                     SetValue = set,
                     GetValue = function() return selected end,
-                    Refresh = function(_,newOptions)
+                    Refresh = function(_, newOptions)
                         choices = newOptions
-
-                        if not table.find(choices,selected) then
+                        if not table.find(choices, selected) then
                             selected = choices[1]
-                            b.Text = tostring(selected or "Select").."  ▾"
-
-                            if id then
-                                Window.Config[id] = selected
-                            end
+                            b.Text = tostring(selected or "Select") .. "  ▾"
+                            if id then Window.Config[id] = selected end
                         end
-                    end
+                    end,
                 }
             end
 
             -- TEXTBOX
-
             function Section:CreateTextbox(config)
                 config = config or {}
-
-                local id = config.ConfigKey
+                local id    = config.ConfigKey
                 local value = config.CurrentValue or ""
 
-                local row = makeRow(32,config.Name)
+                local row    = makeRow(32, config.Name)
+                local titleL = makeLabel(row, config.Name or "Textbox",
+                    UDim2.new(0.4, 0, 1, 0), theme.Text)
+                titleL:SetAttribute("UIText", true)
 
-                local title = makeLabel(
-                    row,
-                    config.Name or "Textbox",
-                    UDim2.new(0.4,0,1,0),
-                    theme.Text
-                )
-
-                title:SetAttribute("UIText",true)
-
-                local box = new("TextBox",{
-                    Position = UDim2.new(0.42,0,0,0),
-                    Size = UDim2.new(0.58,0,1,0),
+                local box = new("TextBox", {
+                    Position = UDim2.new(0.42, 0, 0, 0),
+                    Size     = UDim2.new(0.58, 0, 1, 0),
                     BackgroundColor3 = theme.Element,
-                    Text = value,
-                    PlaceholderText = config.PlaceholderText or "Enter text...",
+                    Text             = value,
+                    PlaceholderText  = config.PlaceholderText or "Enter text...",
                     PlaceholderColor3 = theme.Muted,
-                    TextColor3 = theme.Text,
-                    Font = Enum.Font.Gotham,
-                    TextSize = 11,
+                    TextColor3       = theme.Text,
+                    Font             = Enum.Font.Gotham,
+                    TextSize         = 11,
                     ClearTextOnFocus = false,
-                    BorderSizePixel = 0
-                },row)
-
-                round(box,5)
+                    BorderSizePixel  = 0,
+                }, row)
+                round(box, 5)
 
                 local function set(newValue)
                     value = tostring(newValue or "")
                     box.Text = value
-
-                    if id then
-                        Window.Config[id] = value
-                    end
-
-                    if config.Callback then
-                        task.spawn(config.Callback,value,false)
-                    end
+                    if id then Window.Config[id] = value end
+                    safeCall(config.Callback, value, false)
                 end
 
-                box.FocusLost:Connect(function(enterPressed)
+                track(box.FocusLost:Connect(function(enterPressed)
                     value = box.Text
+                    if id then Window.Config[id] = value end
+                    safeCall(config.Callback, value, enterPressed)
+                end))
 
-                    if id then
-                        Window.Config[id] = value
-                    end
-
-                    if config.Callback then
-                        task.spawn(config.Callback,value,enterPressed)
-                    end
-                end)
-
-                if id then
-                    Window.Controls[id] = {Set = set}
-                end
-
+                if id then Window.Controls[id] = { Set = set } end
                 return box
             end
 
             -- KEYBIND
-
             function Section:CreateKeybind(config)
                 config = config or {}
-
-                local key = config.CurrentKey or Enum.KeyCode.K
-                local id = config.ConfigKey
+                local key       = config.CurrentKey or Enum.KeyCode.K
+                local id        = config.ConfigKey
                 local listening = false
 
-                local row = makeRow(32,config.Name)
+                local row    = makeRow(32, config.Name)
+                local titleL = makeLabel(row, config.Name or "Keybind",
+                    UDim2.new(0.6, 0, 1, 0), theme.Text)
+                titleL:SetAttribute("UIText", true)
 
-                local title = makeLabel(
-                    row,
-                    config.Name or "Keybind",
-                    UDim2.new(0.6,0,1,0),
-                    theme.Text
-                )
-
-                title:SetAttribute("UIText",true)
-
-                local b = makeButton(
-                    row,key.Name,
-                    UDim2.new(1,-100,0,0),
-                    UDim2.fromOffset(100,32),
-                    theme
-                )
-
-                b:SetAttribute("UIElement",true)
+                local b = makeButton(row, key.Name,
+                    UDim2.new(1, -100, 0, 0),
+                    UDim2.fromOffset(100, 32), theme)
+                b:SetAttribute("UIElement", true)
 
                 local function set(newKey)
                     if typeof(newKey) ~= "EnumItem"
                         or newKey.EnumType ~= Enum.KeyCode then
                         return
                     end
-
                     key = newKey
                     b.Text = key.Name
-
-                    if id then
-                        Window.Config[id] = key.Name
-                    end
+                    if id then Window.Config[id] = key.Name end
                 end
 
-                b.Activated:Connect(function()
+                track(b.Activated:Connect(function()
                     listening = true
                     b.Text = "Press key..."
-                end)
+                end))
 
-                local connection = UIS.InputBegan:Connect(function(input,processed)
+                track(UIS.InputBegan:Connect(function(input)
                     if listening then
                         if input.UserInputType == Enum.UserInputType.Keyboard then
                             set(input.KeyCode)
@@ -1184,75 +1020,54 @@ function UI:CreateWindow(options)
                         end
                         return
                     end
-
-                    if processed or UIS:GetFocusedTextBox() then
-                        return
-                    end
-
+                    if UIS:GetFocusedTextBox() then return end
                     if input.UserInputType == Enum.UserInputType.Keyboard
                         and input.KeyCode == key then
-
-                        if config.Callback then
-                            task.spawn(config.Callback,key)
-                        end
+                        safeCall(config.Callback, key)
                     end
-                end)
+                end))
 
                 if id then
                     Window.Controls[id] = {
                         Set = function(value)
                             if typeof(value) == "string" then
-                                local success,result = pcall(function()
+                                local ok, result = pcall(function()
                                     return Enum.KeyCode[value]
                                 end)
-
-                                if success and result then
-                                    set(result)
-                                end
+                                if ok and result then set(result) end
                             else
                                 set(value)
                             end
-                        end
+                        end,
                     }
                 end
 
                 return {
                     SetValue = set,
                     GetValue = function() return key end,
-                    Disconnect = function()
-                        connection:Disconnect()
-                    end
                 }
             end
 
             return Section
         end
 
-        tabButton.Activated:Connect(function()
+        track(tabButton.Activated:Connect(function()
             Window.ActiveTab = Tab
-
-            for _,existing in ipairs(Window.Tabs) do
+            for _, existing in ipairs(Window.Tabs) do
                 existing.Frame.Visible = false
                 existing.Button.BackgroundColor3 = theme.Element
                 existing.Button.TextColor3 = theme.Muted
             end
-
-            frame.Visible = true
-            frame.Position = UDim2.fromOffset(8,0)
-
-            animate(frame,{
-                Position = UDim2.fromOffset(0,0)
-            },0.18)
-
+            frame.Visible  = true
+            frame.Position = UDim2.fromOffset(8, 0)
+            animate(frame, { Position = UDim2.fromOffset(0, 0) }, 0.18)
             tabButton.BackgroundColor3 = theme.Accent
             tabButton.TextColor3 = theme.Text
-        end)
+            closeDropdown()
+        end))
 
-        table.insert(Window.Tabs,Tab)
-
-        if #Window.Tabs == 1 then
-            tabButton:Activate()
-        end
+        table.insert(Window.Tabs, Tab)
+        if #Window.Tabs == 1 then tabButton:Activate() end
 
         return Tab
     end
@@ -1261,18 +1076,26 @@ function UI:CreateWindow(options)
     -- CLEANUP
     --==================================================
 
-    gui.Destroying:Connect(function()
-        Window.Destroyed = true
-        keyConnection:Disconnect()
+    function Window:Destroy()
+        if gui.Parent then gui:Destroy() end
+    end
 
-        for index,existing in ipairs(UI.Windows) do
+    track(gui.Destroying:Connect(function()
+        Window.Destroyed = true
+        closeDropdown()
+        for _, conn in ipairs(Window._connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        Window._connections = {}
+        for i, existing in ipairs(UI.Windows) do
             if existing == Window then
-                table.remove(UI.Windows,index)
+                table.remove(UI.Windows, i)
                 break
             end
         end
-    end)
+    end))
 
+    table.insert(UI.Windows, Window)
     return Window
 end
 
