@@ -1,5 +1,5 @@
 --[[
-    IncrementalUi v3.3 — Library File
+    IncrementalUi v3.4 — Library File
     Paste this entire file into GitHub.
 ]]
 
@@ -11,7 +11,7 @@ local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local Player = Players.LocalPlayer
 
-UI.Version = "3.3.0"
+UI.Version = "3.4.0"
 UI.Windows = {}
 
 --==== THEMES ====--
@@ -218,10 +218,16 @@ function UI:CreateKeySystem(options)
     local gui = new("ScreenGui", { Name = "IncrementalUi_KeySystem", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, Player:WaitForChild("PlayerGui"))
 
     local bg = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.4, BorderSizePixel = 0, ZIndex = 1000 }, gui)
-    pcall(function() new("BlurEffect", {Size = 20}, game.Lighting) end)
+    
+    local blur
+    pcall(function() 
+        blur = Instance.new("BlurEffect", game.Lighting) 
+        blur.Size = 20 
+    end)
 
+    -- Main Panel (slightly smaller since we removed the header)
     local main = new("Frame", {
-        Size = UDim2.fromOffset(400, 380), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(380, 320), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
         BackgroundColor3 = theme.Background, BorderSizePixel = 0,
     }, bg)
     round(main, 16); gradient(main, theme.Grad1, theme.Grad2, 45); outline(main, theme.Border, 1.5)
@@ -231,25 +237,19 @@ function UI:CreateKeySystem(options)
     local uiScale = new("UIScale", {Scale = 0}, main)
     tw(uiScale, {Scale = 1}, 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
-    local header = new("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = theme.Sidebar, BorderSizePixel = 0, ZIndex = 2 }, main)
-    round(header, 16)
-    new("Frame", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12), BackgroundColor3 = theme.Sidebar, BorderSizePixel = 0, ZIndex = 2 }, header)
-    
-    local headerTitle = makeLabel(header, "Authentication Required", UDim2.new(1, 0, 1, 0), theme.Text)
-    headerTitle.TextXAlignment = Enum.TextXAlignment.Center; headerTitle.Font = Enum.Font.GothamBold; headerTitle.TextSize = 15; headerTitle.ZIndex = 3
+    local content = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 3 }, main)
+    new("UIListLayout", { Padding = UDim.new(0, 15), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center }, content)
 
-    local content = new("Frame", { Size = UDim2.new(1, -40, 1, -60), Position = UDim2.fromOffset(20, 50), BackgroundTransparency = 1, ZIndex = 3 }, main)
-    new("UIListLayout", { Padding = UDim.new(0, 15), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center }, content)
-
+    -- 1. Profile
     local profileFrame = new("Frame", { Size = UDim2.new(1, 0, 0, 80), BackgroundTransparency = 1, LayoutOrder = 1 }, content)
 
     local avatar = new("ImageLabel", {
-        Size = UDim2.fromOffset(72, 72), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-        BackgroundColor3 = theme.Element, BorderSizePixel = 0, ZIndex = 4,
+        Size = UDim2.fromOffset(70, 70), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        BackgroundColor3 = theme.Element, BorderSizePixel = 0, ZIndex = 4, ScaleType = Enum.ScaleType.Crop
     }, profileFrame)
     round(avatar, 999); outline(avatar, theme.Accent, 2, 0)
 
-    local ring = new("Frame", { Size = UDim2.fromOffset(78, 78), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundTransparency = 1, ZIndex = 3 }, profileFrame)
+    local ring = new("Frame", { Size = UDim2.fromOffset(76, 76), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundTransparency = 1, ZIndex = 3 }, profileFrame)
     round(ring, 999); outline(ring, theme.Glow, 2, 0.2)
     task.spawn(function() while ring.Parent do ring.Rotation = 0; tw(ring, {Rotation = 360}, 3, Enum.EasingStyle.Linear); task.wait(3) end end)
 
@@ -258,15 +258,17 @@ function UI:CreateKeySystem(options)
         if success and img then avatar.Image = img end
     end)
 
-    local nameFrame = new("Frame", { Size = UDim2.new(1, -100, 1, 0), Position = UDim2.new(0, 100, 0, 0), BackgroundTransparency = 1 }, profileFrame)
-    new("UIListLayout", {Padding = UDim.new(0, 4), VerticalAlignment = Enum.VerticalAlignment.Center}, nameFrame)
+    local dName = makeLabel(profileFrame, Player.DisplayName, UDim2.new(1, 0, 0, 18), theme.Text)
+    dName.Position = UDim2.new(0, 0, 1, -18); dName.TextXAlignment = Enum.TextXAlignment.Center; dName.Font = Enum.Font.GothamBold; dName.TextSize = 15; dName.ZIndex = 4
+    
+    local uName = makeLabel(profileFrame, "@" .. Player.Name, UDim2.new(1, 0, 0, 14), theme.Muted)
+    uName.Position = UDim2.new(0, 0, 1, 2); uName.TextXAlignment = Enum.TextXAlignment.Center; uName.TextSize = 12; uName.ZIndex = 4
 
-    local dName = makeLabel(nameFrame, Player.DisplayName, UDim2.new(1, 0, 0, 20), theme.Text)
-    dName.Font = Enum.Font.GothamBold; dName.TextSize = 16; dName.LayoutOrder = 1
-    local uName = makeLabel(nameFrame, "@" .. Player.Name, UDim2.new(1, 0, 0, 18), theme.Muted)
-    uName.TextSize = 13; uName.LayoutOrder = 2
+    -- Spacer to push buttons down
+    new("Frame", { Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, LayoutOrder = 2 }, content)
 
-    local inputFrame = new("Frame", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, LayoutOrder = 2 }, content)
+    -- 2. Input
+    local inputFrame = new("Frame", { Size = UDim2.new(1, -60, 0, 60), BackgroundTransparency = 1, LayoutOrder = 3 }, content)
 
     local box = new("TextBox", {
         Size = UDim2.new(1, 0, 0, 45), BackgroundColor3 = theme.Element, Text = "", PlaceholderText = "Enter License Key...",
@@ -281,7 +283,8 @@ function UI:CreateKeySystem(options)
     box.Focused:Connect(function() tw(boxGlow, {Color = theme.Accent, Transparency = 0.2}, 0.2) end)
     box.FocusLost:Connect(function() tw(boxGlow, {Color = theme.Border, Transparency = 0}, 0.2) end)
 
-    local btnFrame = new("Frame", { Size = UDim2.new(1, 0, 0, 45), BackgroundTransparency = 1, LayoutOrder = 3 }, content)
+    -- 3. Buttons
+    local btnFrame = new("Frame", { Size = UDim2.new(1, -60, 0, 45), BackgroundTransparency = 1, LayoutOrder = 4 }, content)
     new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 10), HorizontalAlignment = Enum.HorizontalAlignment.Center }, btnFrame)
 
     local getKeyBtn = makeButton(btnFrame, "Get Key", UDim2.new(), UDim2.new(0.4, -5, 1, 0), theme)
@@ -309,17 +312,35 @@ function UI:CreateKeySystem(options)
         if isChecking then return end
         if box.Text == correctKey then
             isChecking = true
-            errorLbl.TextColor3 = Color3.fromRGB(80, 255, 80); errorLbl.Text = "Authentication Successful!"; errorLbl.TextTransparency = 0
-            boxGlow.Color = Color3.fromRGB(80, 255, 80); boxGlow.Transparency = 0
+            
+            -- Black text on success as requested
+            errorLbl.TextColor3 = Color3.fromRGB(0, 0, 0)
+            errorLbl.Text = "Authentication Successful!"
+            errorLbl.TextTransparency = 0
+            
+            boxGlow.Color = Color3.fromRGB(0, 0, 0)
+            boxGlow.Transparency = 0
+            
             burstSparkles(main, theme.Glow, 30, 6)
             task.wait(0.8)
+            
             tw(bg, {BackgroundTransparency = 1}, 0.4)
             tw(main, {Size = UDim2.fromOffset(0, 0)}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-            task.wait(0.5); gui:Destroy()
+            task.wait(0.5)
+            
+            -- DESTROY BLUR
+            if blur then blur:Destroy() end
+            gui:Destroy()
+            
             if options.OnSuccess then options.OnSuccess() end
         else
-            errorLbl.TextColor3 = Color3.fromRGB(255, 80, 80); errorLbl.Text = "Invalid Key"; errorLbl.TextTransparency = 0
-            boxGlow.Color = Color3.fromRGB(255, 80, 80); boxGlow.Transparency = 0
+            errorLbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+            errorLbl.Text = "Invalid Key"
+            errorLbl.TextTransparency = 0
+            
+            boxGlow.Color = Color3.fromRGB(255, 80, 80)
+            boxGlow.Transparency = 0
+            
             local startPos = main.Position
             task.spawn(function()
                 for _ = 1, 6 do
@@ -328,7 +349,11 @@ function UI:CreateKeySystem(options)
                 end
                 tw(main, {Position = startPos}, 0.15, Enum.EasingStyle.Back)
             end)
-            task.delay(2, function() tw(errorLbl, {TextTransparency = 1}, 0.5); tw(boxGlow, {Color = theme.Border, Transparency = 0}, 0.5) end)
+            
+            task.delay(2, function() 
+                tw(errorLbl, {TextTransparency = 1}, 0.5) 
+                tw(boxGlow, {Color = theme.Border, Transparency = 0}, 0.5)
+            end)
         end
     end
 
@@ -524,7 +549,7 @@ function UI:CreateWindow(options)
     function Window:Notify(config)
         config = config or {}
         local n = new("Frame", { Size = UDim2.fromOffset(notificationWidth, 80), Position = UDim2.new(1, notificationWidth + 30, 1, -96), BackgroundColor3 = theme.Section, BorderSizePixel = 0, ZIndex = 30 }, gui)
-        n:SetAttribute("UISection", true); round(n, 10); gradient(n, theme.Grad1, theme.Grad2, 45); local nGlow = outline(n, theme.Accent, 2, 0.2)
+        n:SetAttribute("UISection", true); round(n, 10); gradient(n, theme.Grad1, theme.Grad2, 45); outline(n, theme.Accent, 2, 0.2)
         local heading = makeLabel(n, config.Title or "Notification", UDim2.new(1, -20, 0, 26), theme.Text)
         heading.Position = UDim2.fromOffset(14, 8); heading.Font = Enum.Font.GothamBold; heading.TextSize = 14; heading.ZIndex = 31; heading:SetAttribute("UIText", true)
         local desc = makeLabel(n, config.Content or "", UDim2.new(1, -20, 0, 36), theme.Muted)
