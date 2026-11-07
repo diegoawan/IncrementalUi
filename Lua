@@ -1,11 +1,9 @@
 --[[
-    IncrementalUi v5.4.0 — Sound Fix + Music Engine + Themes + Effects Edition
-    - Fixed sound volume (no more quiet playback)
-    - Full music engine (drum machine + custom tracks)
-    - 10 new themes (Synthwave, Lava, Arctic, Candy, Terminal, Royal, Bloodmoon, Tokyo, Riot, Deepsea)
-    - 8 new beat-reactive effects (BeatPulse, Disco, RingViz, Plasma, Tunnel, Meteors, Radar, Chaos)
-    - Sound packs (Soft, Crisp, Retro, Deep)
-    - Theme-aware auto-music
+    IncrementalUi v6.0.0 — The Ultimate Edition
+    - 75 Total Themes (33 original + 42 new)
+    - 42+ Real Songs & Loops (Compiler + Synth Engine)
+    - Theme Cutscenes (18 different cinematic animations)
+    - Signature Sound Design (Sweeps, Chains, SFX)
 ]]
 
 local UI = {}
@@ -24,7 +22,7 @@ local Debris = game:GetService("Debris")
 local ContentProvider = game:GetService("ContentProvider")
 local Player = Players.LocalPlayer
 
-UI.Version = "5.4.0"
+UI.Version = "6.0.0"
 UI.Windows = {}
 UI.AntiAfk = false
 UI.AutoSave = false
@@ -3349,6 +3347,996 @@ function UI:CreateWindow(options)
     end
 
     return Window
+end
+
+--========================================================================
+-- IncrementalUi v6.0 EXPANSION
+-- Real songs • 42 new themes • theme cutscenes • signature sound design
+--========================================================================
+do
+UI.Version = "6.0.0"
+UI.CutscenesEnabled = true
+UI.ThemeSfxEnabled = true
+UI.ThemeCut = {}
+UI.ThemeSfx = {}
+
+local WHITE, BLACK = Color3.new(1, 1, 1), Color3.new(0, 0, 0)
+local rand = math.random
+local nk = NumberSequenceKeypoint.new
+
+-- SOUND ENGINE (same 5 stock samples, but sweeps + real SoundEffects chains)
+local CHAINS = {
+	none = {},
+	hall = { { "ReverbSoundEffect", { DecayTime = 3.5, Density = 1, Diffusion = 1, DryLevel = -2, WetLevel = -3 } } },
+	cave = { { "ReverbSoundEffect", { DecayTime = 7, Density = 1, Diffusion = 1, DryLevel = -5, WetLevel = 0 } } },
+	echo = { { "EchoSoundEffect", { Delay = 0.26, Feedback = 0.55, DryLevel = 0, WetLevel = -5 } } },
+	dirt = { { "DistortionSoundEffect", { Level = 0.75 } } },
+	grit = { { "DistortionSoundEffect", { Level = 0.9 } }, { "EqualizerSoundEffect", { HighGain = -8, MidGain = 4, LowGain = 4 } } },
+	chorus = { { "ChorusSoundEffect", { Depth = 0.7, Mix = 0.7, Rate = 1.5 } } },
+	flange = { { "FlangeSoundEffect", { Depth = 0.9, Mix = 0.8, Rate = 0.5 } } },
+	trem = { { "TremoloSoundEffect", { Depth = 0.9, Duty = 0.5, Frequency = 12 } } },
+	low = { { "EqualizerSoundEffect", { HighGain = -25, MidGain = -5, LowGain = 6 } } },
+	thin = { { "EqualizerSoundEffect", { HighGain = 6, MidGain = 3, LowGain = -30 } } },
+	up = { { "PitchShiftSoundEffect", { Octave = 2 } } },
+	down = { { "PitchShiftSoundEffect", { Octave = 0.5 } } },
+	dream = {
+		{ "ChorusSoundEffect", { Depth = 0.5, Mix = 0.6, Rate = 0.8 } },
+		{ "ReverbSoundEffect", { DecayTime = 5, Density = 1, Diffusion = 1, DryLevel = -3, WetLevel = -2 } },
+	},
+	robot = { { "FlangeSoundEffect", { Depth = 1, Mix = 1, Rate = 8 } } },
+	radio = { { "DistortionSoundEffect", { Level = 0.5 } }, { "EqualizerSoundEffect", { HighGain = 0, MidGain = 5, LowGain = -40 } } },
+}
+UI.Chains = CHAINS
+
+local function play(base, vol, pitch, o)
+	if not UI.SoundEnabled then return end
+	local id = UI.Sounds[base]
+	if not id then return end
+	o = o or {}
+	pcall(function()
+		local s = Instance.new("Sound")
+		s.SoundId = id
+		s.Volume = math.clamp((vol or 1) * UI.SoundVolume * UI.SoundGain, 0, 10)
+		s.PlaybackSpeed = math.clamp(pitch or 1, 0.1, 4)
+		for _, fx in ipairs(CHAINS[o.chain or "none"] or {}) do
+			local e = Instance.new(fx[1])
+			for k, v in pairs(fx[2]) do pcall(function() e[k] = v end) end
+			e.Parent = s
+		end
+		s.Parent = SoundService
+		s:Play()
+		if o.to then
+			TweenService:Create(s, TweenInfo.new(o.dur or 0.2, Enum.EasingStyle.Quad), { PlaybackSpeed = math.clamp(o.to, 0.1, 4) }):Play()
+		end
+		s.Ended:Connect(function() s:Destroy() end)
+		Debris:AddItem(s, o.life or 6)
+	end)
+end
+local function after(t, fn) task.delay(t, fn) end
+
+local SC = {
+	minor = { 0, 2, 3, 5, 7, 8, 10 }, major = { 0, 2, 4, 5, 7, 9, 11 }, dorian = { 0, 2, 3, 5, 7, 9, 10 },
+	phrygian = { 0, 1, 3, 5, 7, 8, 10 }, harmonic = { 0, 2, 3, 5, 7, 8, 11 }, lydian = { 0, 2, 4, 6, 7, 9, 11 },
+	mixo = { 0, 2, 4, 5, 7, 9, 10 }, penta = { 0, 3, 5, 7, 10 }, hira = { 0, 2, 3, 7, 8 }, whole = { 0, 2, 4, 6, 8, 10 },
+}
+local function semi(scale, d)
+	local n = #scale
+	return scale[(d % n) + 1] + 12 * math.floor(d / n)
+end
+local function nt(p, d) return p.f * 2 ^ (semi(p.sc, d) / 12) end
+
+local A = {}
+A.zap = function(p) play("Snap", 1.6 * p.v, 3.4 * p.f, { to = 0.5 * p.f, dur = 0.25, chain = p.ch }) end
+A.zip = function(p) play("Ping", 1.2 * p.v, 0.8 * p.f, { to = 3.2 * p.f, dur = 0.16, chain = p.ch }) end
+A.bell = function(p)
+	local d = rand(0, 9)
+	play("Ping", 1.3 * p.v, nt(p, d), { chain = p.ch })
+	after(0.07, function() play("Ping", 0.5 * p.v, nt(p, d) * 2, { chain = p.ch }) end)
+end
+A.drip = function(p) play("Water", 1.3 * p.v, 0.7 * p.f, { to = 1.9 * p.f, dur = 0.16, chain = p.ch }) end
+A.bubble = function(p)
+	play("Water", 1.2 * p.v, 1.2 * p.f, { to = 2.8 * p.f, dur = 0.12, chain = p.ch })
+	after(0.1, function() play("Water", 0.8 * p.v, 1.6 * p.f, { to = 3 * p.f, dur = 0.1, chain = p.ch }) end)
+end
+A.thump = function(p) play("Bass", 1.8 * p.v, 0.6 * p.f, { to = 0.32 * p.f, dur = 0.3, chain = p.ch }) end
+A.arp = function(p)
+	for i = 0, 3 do
+		after(i * 0.09, function() play("Ping", p.v, nt(p, i * 2 + rand(0, 1)), { chain = p.ch }) end)
+	end
+end
+A.stutter = function(p)
+	for i = 0, 3 do
+		after(i * 0.045, function() play("Snap", 1.2 * p.v, (0.6 + rand() * 2.4) * p.f, { chain = p.ch }) end)
+	end
+end
+A.riser = function(p)
+	play("Switch", 1.4 * p.v, 0.5 * p.f, { to = 3 * p.f, dur = 0.6, chain = p.ch })
+	after(0.62, function() play("Ping", 1.1 * p.v, nt(p, 7), { chain = p.ch }) end)
+end
+A.chime = function(p)
+	local d = rand(5, 9)
+	for i = 0, 2 do
+		after(i * 0.13, function() play("Ping", 1.1 * p.v, nt(p, d - i * 2), { chain = p.ch }) end)
+	end
+end
+A.pulse = function(p)
+	play("Bass", 1.2 * p.v, 0.9 * p.f, { chain = p.ch })
+	after(0.18, function() play("Ping", 1.2 * p.v, nt(p, 7), { chain = p.ch }) end)
+end
+A.crackle = function(p)
+	for _ = 1, rand(2, 4) do
+		after(rand() * 0.3, function() play("Snap", 0.8 * p.v, (2 + rand() * 2) * p.f, { chain = p.ch }) end)
+	end
+end
+A.swell = function(p) play("Bass", 1.2 * p.v, 0.3 * p.f, { to = 0.8 * p.f, dur = 1.4, chain = p.ch, life = 8 }) end
+A.sparkle = function(p)
+	for i = 1, 5 do
+		after(i * 0.05, function() play("Ping", 0.8 * p.v, nt(p, rand(5, 12)), { chain = p.ch }) end)
+	end
+end
+A.wobble = function(p)
+	play("Bass", 1.6 * p.v, 0.5 * p.f, { to = 0.9 * p.f, dur = 0.25, chain = p.ch })
+	after(0.25, function() play("Bass", 1.4 * p.v, 0.9 * p.f, { to = 0.4 * p.f, dur = 0.3, chain = p.ch }) end)
+end
+A.tick = function(p)
+	play("Switch", 1.3 * p.v, (1.8 + rand() * 0.6) * p.f, { chain = p.ch })
+	after(0.12, function() play("Switch", p.v, 1.3 * p.f, { chain = p.ch }) end)
+end
+A.typewriter = function(p)
+	for i = 0, 2 do
+		after(i * 0.07, function() play("Switch", 1.1 * p.v, (2.2 + rand() * 0.8) * p.f, { chain = p.ch }) end)
+	end
+end
+A.boom = function(p)
+	play("Bass", 2.2 * p.v, 0.4 * p.f, { chain = p.ch })
+	play("Water", p.v, 0.4 * p.f, { to = 0.2 * p.f, dur = 0.5, chain = p.ch })
+	after(0.05, function() play("Snap", 0.8 * p.v, 0.5 * p.f, { chain = p.ch }) end)
+end
+A.coin = function(p)
+	play("Ping", 1.2 * p.v, nt(p, 4), { chain = p.ch })
+	after(0.09, function() play("Ping", 1.2 * p.v, nt(p, 11), { chain = p.ch }) end)
+end
+A.wind = function(p) play("Water", p.v, 0.5 * p.f, { to = 1.4 * p.f, dur = 1.0, chain = p.ch, life = 8 }) end
+A.heart = function(p)
+	play("Bass", 1.7 * p.v, 0.5 * p.f, { chain = p.ch })
+	after(0.17, function() play("Bass", 1.3 * p.v, 0.45 * p.f, { chain = p.ch }) end)
+end
+A.gong = function(p)
+	play("Bass", 1.6 * p.v, 0.45 * p.f, { chain = p.ch })
+	play("Ping", p.v, 0.5 * p.f, { chain = p.ch, life = 8 })
+	after(0.04, function() play("Ping", 0.7 * p.v, 0.75 * p.f, { chain = p.ch }) end)
+end
+A.steam = function(p) play("Water", 0.9 * p.v, 2.6 * p.f, { to = 1.6 * p.f, dur = 0.5, chain = p.ch }) end
+A.thunder = function(p)
+	play("Snap", p.v, 0.4 * p.f, { chain = p.ch })
+	after(0.25, function() play("Bass", 2.0 * p.v, 0.35 * p.f, { to = 0.25 * p.f, dur = 1.0, chain = p.ch }) end)
+	after(0.5, function() play("Water", 1.2 * p.v, 0.3 * p.f, { to = 0.2 * p.f, dur = 1.2, chain = p.ch, life = 8 }) end)
+end
+UI.SfxArchetypes = A
+
+local function sf(a, f, sc, ch, i1, i2, v)
+	return { a = a, f = f or 1, sc = SC[sc or "minor"], ch = ch or "none", v = v or 1, i = { i1 or 2.5, i2 or 5 } }
+end
+UI.SfxRow = sf
+
+function UI.PlayThemeSfx(name, mult)
+	local c = UI.ThemeSfx[name]
+	if not c then return false end
+	local fn = A[c.a]
+	if fn then fn({ f = c.f * (mult or 1) * (0.94 + rand() * 0.12), sc = c.sc, ch = c.ch, v = c.v }) end
+	return true
+end
+function UI.PlaySfxRecipe(a, f, ch, name)
+	local fn = A[a]
+	if not fn then return end
+	local cfg = UI.ThemeSfx[name]
+	fn({ f = (cfg and cfg.f or 1) * (f or 1), sc = cfg and cfg.sc or SC.minor, ch = ch or (cfg and cfg.ch) or "none", v = 1 })
+end
+
+-- SONG COMPILER
+local P = {
+	a = { 0, 5, 3, 4 }, b = { 0, 3, 4, 0 }, c = { 0, 4, 5, 3 }, d = { 5, 3, 0, 4 }, e = { 0, 2, 3, 4 }, f = { 0, 5, 2, 4 },
+	g = { 0, 6, 5, 4 }, h = { 0, 3, 5, 4 }, i = { 0, 0, 3, 4 }, j = { 0, 4, 3, 5 }, k = { 3, 4, 0, 0 }, l = { 0, 2, 5, 4 },
+}
+local R = {
+	a = "x..x..x...x.x...", b = "x.x...x.x...x.x.", c = "x...x...x..x..x.", d = "xx.x..x.x.xx..x.",
+	e = "x.....x...x.....", f = "x..x.x..x..x.x..", g = "x.x.x.x.x.x.xx.x", h = "x...x.x.x...x.x.",
+}
+local GROOVES = {
+	four = { d = { K = "x...x...x...x...", S = "....x.......x...", H = ".x.x.x.x.x.x.x.x" }, b = "x.x.x.x.x.x.x.x." },
+	boom = { d = { K = "x..x......x.x...", S = "....x.......x...", H = "x.x.x.x.x.x.x.xx" }, b = "x..x......x.x..." },
+	trap = { d = { K = "x.....x...x.....", S = "........x.......", H = "xoxoxoxoxoxoxxxo", C = "........x......." }, b = "x.....x.......x." },
+	half = { d = { K = "x...............", S = "........x.......", H = "x.x.x.x.x.x.x.x." }, b = "x.......x......." },
+	dnb = { d = { K = "x.........x.....", S = "....x.......x...", H = "x.x.x.x.x.x.x.x." }, b = "x.....x...x....." },
+	dem = { d = { K = "x...x...x...x...", S = "...x..x....x..x.", H = "x.x.x.x.x.x.x.x." }, b = "x..x..x.x..x..x." },
+	rock = { d = { K = "x.....x.x.......", S = "....x.......x...", H = "x.x.x.x.x.x.x.x.", C = "x..............." }, b = "x.x...x.x.x....." },
+	house = { d = { K = "x...x...x...x...", S = "................", H = "..x...x...x...x.", C = "....x.......x..." }, b = "..x...x...x...x." },
+	shuf = { d = { K = "x.....x.....x...", S = "....x.......x...", H = "x.xx.xx.xx.xx.xx" }, b = "x.....x.....x..." },
+	none = { d = {} },
+}
+local SECS = {
+	intro = { drums = "off", bass = false, mel = "sparse", win = { 0, 12 } },
+	verse = { drums = "thin", bass = true, mel = "arp", win = { -7, 7 } },
+	chorus = { drums = "full", bass = true, mel = "hook", win = { 5, 19 } },
+	bridge = { drums = "off", bass = false, mel = "long", win = { -3, 9 } },
+	outro = { drums = "kick", bass = false, mel = "sparse", win = { 0, 12 } },
+	build = { drums = "thin", bass = true, mel = "arp", win = { -5, 9 } },
+	drop = { drums = "full", bass = true, mel = "hook", win = { 5, 19 } },
+	lull = { drums = "off", bass = false, mel = "long", win = { -3, 9 } },
+}
+local FORMS = {
+	pop = { "intro", "verse", "chorus", "verse", "chorus", "bridge", "chorus", "outro" },
+	short = { "intro", "verse", "chorus", "verse", "chorus", "outro" },
+	edm = { "intro", "build", "drop", "lull", "build", "drop", "outro" },
+	chill = { "intro", "verse", "verse", "bridge", "verse", "outro" },
+}
+local DOTS = string.rep(".", 16)
+local function thin(p)
+	local out = {}
+	for i = 1, #p do
+		local ch = string.sub(p, i, i)
+		out[i] = (i % 4 == 1) and ch or "."
+	end
+	return table.concat(out)
+end
+local function fold(m, lo, hi)
+	while m < lo do m += 12 end
+	while m > hi do m -= 12 end
+	return m
+end
+
+local function compile(sp)
+	local rng = Random.new(sp.seed)
+	local sc, g = SC[sp.scale], GROOVES[sp.groove]
+	local prog, rhythm = P[sp.pk], R[sp.rk]
+	local hook, d = {}, rng:NextInteger(0, 2)
+	local walk = { -2, -1, -1, 0, 1, 1, 2 }
+	for s = 1, 16 do
+		if string.sub(rhythm, s, s) == "x" then
+			d = math.clamp(d + walk[rng:NextInteger(1, #walk)], -1, 4)
+			hook[s] = d
+		else
+			hook[s] = false
+		end
+	end
+	local mel, bass, pad, dr = {}, {}, {}, {}
+	local step = 0
+	for _, secName in ipairs(FORMS[sp.form or "pop"]) do
+		local sec = SECS[secName]
+		for bar, rd in ipairs(prog) do
+			local last = bar == #prog
+			local cs = { semi(sc, rd), semi(sc, rd + 2), semi(sc, rd + 4) }
+			if sec.drums == "full" then cs[4] = semi(sc, rd + 6) end
+			for k, v in ipairs(cs) do cs[k] = fold(v, -2, 12) end
+			pad[step + 1] = cs
+			local bn = fold(semi(sc, rd), -5, 6)
+			for s = 1, 16 do
+				local bch = g.b and string.sub(g.b, s, s) or "."
+				bass[step + s] = (sec.bass and bch == "x") and bn or false
+				local m = false
+				if sec.mel == "hook" then
+					local h = hook[s]
+					if h then
+						if last and s >= 13 then h += 2 end
+						m = semi(sc, rd + h)
+					end
+				elseif sec.mel == "arp" then
+					if (s - 1) % 4 == 0 then m = semi(sc, rd + ({ 0, 2, 4, 2 })[(s - 1) // 4 + 1]) end
+				elseif sec.mel == "long" then
+					if s == 1 then m = semi(sc, rd + 4) elseif s == 9 then m = semi(sc, rd + 2) end
+				elseif s == 1 then
+					m = semi(sc, rd + 4)
+				end
+				mel[step + s] = m and fold(m, sec.win[1], sec.win[2]) or false
+			end
+			for key, pat in pairs(g.d) do
+				local out = pat
+				if sec.drums == "off" then
+					out = (key == "K") and "o.......o......." or DOTS
+				elseif sec.drums == "thin" then
+					if key == "H" then out = thin(pat) elseif key == "C" then out = DOTS end
+					if last and key == "S" then out = "....x.....x.xxxx" end
+				elseif sec.drums == "kick" then
+					if not (key == "K" and bar == 1) then out = DOTS end
+				elseif last and key == "S" then
+					out = "....x...x.x.xxxx"
+				end
+				dr[key] = dr[key] or {}
+				table.insert(dr[key], out)
+			end
+			step += 16
+		end
+	end
+	for key, parts in pairs(dr) do dr[key] = table.concat(parts) end
+	return {
+		bpm = sp.bpm, swing = sp.swing, root = sp.root or 0.9, drumVol = 0.55, melVol = 0.42, padVol = 0.2,
+		drums = dr, bass = bass, mel = mel, pad = pad, padLen = step,
+	}
+end
+
+local function Song(name, r)
+	UI.MusicStyles[name] = compile({
+		bpm = r[1], root = r[2], scale = r[3], pk = r[4], groove = r[5], rk = r[6], form = r[7], seed = r[8], swing = r[9],
+	})
+	return name
+end
+UI.AddSong = Song
+
+local function reg(name, cut, tag, glyph, sfxRow, songRow)
+	UI.ThemeCut[name] = { cut, tag, glyph }
+	if sfxRow then UI.ThemeSfx[name] = sfxRow end
+	if songRow then UI.ThemeMusic[name] = Song(name .. " Theme", songRow) end
+end
+local function lum(c) return 0.299 * c.R + 0.587 * c.G + 0.114 * c.B end
+local function N(name, bg, a1, a2, fx, cut, tag, glyph, sfxRow, songRow)
+	local light = lum(bg) > 0.6
+	UI.Themes[name] = {
+		Background = bg,
+		Sidebar = light and bg:Lerp(BLACK, 0.045) or bg:Lerp(WHITE, 0.035),
+		Section = light and bg:Lerp(WHITE, 0.75) or bg:Lerp(WHITE, 0.07),
+		Element = light and bg:Lerp(WHITE, 0.75) or bg:Lerp(WHITE, 0.11),
+		ElementHover = light and bg:Lerp(WHITE, 0.4) or bg:Lerp(WHITE, 0.17),
+		Border = light and bg:Lerp(BLACK, 0.16) or bg:Lerp(WHITE, 0.22),
+		Accent = a1, Accent2 = a2,
+		AccentText = lum(a1) > 0.55 and rgb(14, 14, 20) or WHITE,
+		Text = light and bg:Lerp(BLACK, 0.9) or bg:Lerp(WHITE, 0.92),
+		Muted = light and bg:Lerp(BLACK, 0.5) or bg:Lerp(WHITE, 0.5),
+		Success = rgb(52, 211, 120), Warning = rgb(245, 176, 65), Danger = rgb(240, 82, 82),
+		Fx = fx or "Bats",
+	}
+	table.insert(UI.ThemeOrder, name)
+	reg(name, cut, tag, glyph, sfxRow, songRow)
+end
+UI.AddTheme = N
+
+reg("GreyWhite", "wipe", "Clean slate", nil, sf("tick", 1.1, "minor", "thin", 2.5, 4.5), { 88, 0.9, "minor", "a", "boom", "a", "pop", 101, 0.1 })
+reg("Midnight", "eclipse", "After hours", nil, sf("bell", 0.9, "dorian", "hall", 3, 6), { 74, 0.85, "dorian", "f", "half", "e", "chill", 102, 0.15 })
+reg("Graphite", "matrix", "Carbon core", nil, sf("typewriter", 1, "minor", "none", 2.5, 5), { 92, 0.8, "phrygian", "g", "boom", "f", "pop", 103 })
+reg("Light", "wipe", "Let there be light", nil, sf("bell", 1.2, "major", "hall", 3, 6), { 100, 1.0, "major", "c", "four", "b", "short", 104 })
+reg("Cloud", "wipe", "Head in the clouds", nil, sf("chime", 1.1, "major", "hall", 3.5, 6), { 70, 1.0, "major", "a", "half", "e", "chill", 105 })
+reg("Amethyst", "curtain", "Crystal depths", nil, sf("sparkle", 1, "harmonic", "dream", 3, 6), { 84, 0.9, "harmonic", "d", "half", "c", "pop", 106 })
+reg("Emerald", "ripple", "Evergreen", nil, sf("arp", 1.1, "lydian", "chorus", 2.5, 5), { 96, 0.95, "dorian", "h", "house", "d", "pop", 107 })
+reg("Rose", "curtain", "Petal soft", nil, sf("bell", 1.05, "major", "dream", 3, 5), { 78, 0.95, "major", "d", "half", "c", "pop", 108, 0.12 })
+reg("Frost", "drift", "Cold snap", "❄", sf("chime", 1.4, "penta", "hall", 2.5, 5), { 64, 1.05, "lydian", "b", "none", "e", "chill", 109 })
+reg("Sakura", "drift", "Spring wind", "🌸", sf("sparkle", 1.1, "hira", "hall", 2.5, 5), { 80, 1.0, "minor", "l", "half", "a", "chill", 110 })
+reg("Inferno", "fire", "Feel the heat", nil, sf("crackle", 1, "minor", "dirt", 0.9, 2.2), { 120, 0.8, "phrygian", "g", "rock", "a", "short", 111 })
+reg("Ocean", "liquid", "Deep blue", nil, sf("bubble", 1, "penta", "echo", 1.8, 3.5), { 68, 0.9, "lydian", "a", "none", "e", "chill", 112 })
+reg("Matrix", "matrix", "Wake up", nil, sf("typewriter", 1.2, "minor", "robot", 1.2, 2.5), { 136, 0.8, "phrygian", "g", "trap", "d", "short", 113 })
+reg("Nebula", "warp", "Stardust", nil, sf("swell", 1, "whole", "dream", 4, 7), { 96, 0.9, "lydian", "j", "four", "b", "pop", 114 })
+reg("Aurora", "warp", "Northern lights", nil, sf("wind", 1, "penta", "dream", 4, 7), { 60, 1.0, "lydian", "b", "none", "e", "chill", 115 })
+reg("Cyberpunk", "glitch", "System error", nil, sf("zap", 1, "harmonic", "flange", 2, 4), { 128, 0.85, "harmonic", "a", "four", "d", "edm", 116 })
+reg("Forest", "drift", "Deep woods", "🍃", sf("drip", 0.9, "dorian", "hall", 2.5, 5), { 72, 0.9, "dorian", "a", "half", "c", "chill", 117 })
+reg("Storm", "lightning", "Here it comes", nil, sf("thunder", 1, "minor", "cave", 3.5, 7), { 110, 0.75, "minor", "f", "rock", "e", "pop", 118 })
+reg("Sunset", "sun", "Golden hour", nil, sf("arp", 0.9, "lydian", "hall", 3, 5), { 100, 1.0, "mixo", "c", "four", "a", "pop", 119 })
+reg("Gold", "burst", "Pure luxury", nil, sf("coin", 1, "major", "none", 2.5, 4.5), { 118, 1.0, "major", "c", "dem", "h", "short", 120 })
+reg("Void", "eclipse", "Nothing. Everything.", nil, sf("swell", 0.7, "phrygian", "cave", 4, 8), { 52, 0.75, "phrygian", "b", "none", "e", "chill", 121 })
+reg("Toxic", "glitch", "Contaminated", nil, sf("wobble", 1.1, "minor", "dirt", 2, 4), { 140, 0.8, "phrygian", "g", "trap", "d", "edm", 122 })
+reg("Crimson", "slash", "Cut deep", nil, sf("heart", 1, "phrygian", "low", 2.5, 4.5), { 124, 0.8, "harmonic", "g", "rock", "d", "short", 123 })
+reg("Synthwave", "sun", "Outrun the night", nil, sf("arp", 1, "minor", "chorus", 2.2, 4), { 106, 1.0, "minor", "a", "four", "a", "pop", 124 })
+reg("Lava", "fire", "Molten", nil, sf("wobble", 0.8, "phrygian", "grit", 2, 4), { 150, 0.8, "phrygian", "j", "dnb", "d", "edm", 125 })
+reg("Arctic", "liquid", "Below zero", nil, sf("sparkle", 1.3, "penta", "hall", 2.5, 5), { 58, 1.05, "major", "a", "none", "e", "chill", 126 })
+reg("Candy", "burst", "Sugar rush", nil, sf("sparkle", 1.2, "major", "up", 2, 4), { 112, 1.1, "major", "c", "dem", "g", "short", 127 })
+reg("Terminal", "boot", "root@amber:~#", nil, nil, { 90, 0.9, "minor", "i", "boom", "f", "pop", 128, 0.1 })
+reg("Royal", "curtain", "All hail", nil, sf("coin", 0.9, "harmonic", "hall", 3, 5), { 76, 0.9, "harmonic", "a", "half", "c", "pop", 129 })
+reg("Bloodmoon", "iris", "The moon bleeds", nil, sf("heart", 0.85, "phrygian", "cave", 3, 6), { 132, 0.75, "phrygian", "g", "trap", "d", "pop", 130 })
+reg("Tokyo", "bars", "Neon nights", nil, sf("zip", 1, "penta", "flange", 2, 4), { 140, 1.0, "minor", "h", "house", "g", "edm", 131 })
+reg("Riot", "glitch", "No rules", nil, sf("stutter", 1, "minor", "grit", 1.5, 3), { 160, 0.9, "minor", "i", "rock", "g", "short", 132 })
+reg("Deepsea", "liquid", "Pressure rising", nil, sf("swell", 0.6, "minor", "cave", 4, 8), { 50, 0.7, "minor", "b", "none", "e", "chill", 133 })
+
+N("Vaporwave", rgb(26, 10, 48), rgb(255, 113, 206), rgb(1, 205, 254), "Grid", "sun", "A E S T H E T I C", nil, sf("arp", 1, "lydian", "dream", 2.5, 5), { 92, 1.0, "lydian", "c", "house", "b", "pop", 201 })
+N("Samurai", rgb(12, 10, 12), rgb(230, 30, 50), rgb(235, 235, 235), "Sakura", "slash", "Honor in silence", nil, sf("gong", 1, "phrygian", "cave", 3, 6), { 84, 0.8, "phrygian", "l", "half", "e", "pop", 202 })
+N("Dragon", rgb(20, 6, 6), rgb(255, 60, 30), rgb(255, 200, 40), "Embers", "fire", "Awaken the dragon", nil, sf("boom", 1, "phrygian", "grit", 3, 6), { 112, 0.8, "harmonic", "g", "rock", "d", "short", 203 })
+N("Pirate", rgb(6, 22, 28), rgb(212, 175, 55), rgb(30, 160, 170), "Waves", "liquid", "Fortune favors the bold", nil, sf("coin", 1, "dorian", "echo", 3, 5), { 96, 0.9, "dorian", "b", "shuf", "c", "pop", 204, 0.15 })
+N("Space", rgb(3, 3, 12), rgb(120, 160, 255), rgb(255, 255, 255), "Warp", "warp", "Ignition", nil, sf("riser", 1, "lydian", "hall", 4, 8), { 76, 0.9, "lydian", "a", "none", "e", "chill", 205 })
+N("Galaxy", rgb(14, 6, 32), rgb(200, 120, 255), rgb(90, 200, 255), "Stars", "warp", "Beyond the stars", nil, sf("sparkle", 1.1, "lydian", "dream", 2.5, 5), { 88, 1.0, "lydian", "j", "half", "a", "pop", 206 })
+N("Desert", rgb(30, 18, 8), rgb(240, 160, 60), rgb(250, 220, 140), "Comets", "sun", "Sun-scorched", nil, sf("wind", 0.9, "phrygian", "none", 4, 7), { 90, 0.85, "phrygian", "a", "dem", "a", "pop", 207 })
+N("Jungle", rgb(6, 20, 10), rgb(80, 220, 90), rgb(255, 200, 40), "Fireflies", "drift", "Into the wild", "🍃", sf("bubble", 0.9, "dorian", "hall", 2, 4), { 100, 0.9, "dorian", "c", "dem", "d", "short", 208 })
+N("Haunted", rgb(14, 8, 22), rgb(255, 120, 20), rgb(160, 90, 255), "Bats", "drift", "Something is watching", "🦇", sf("chime", 0.8, "harmonic", "cave", 3, 6), { 82, 0.8, "harmonic", "a", "half", "f", "pop", 209 })
+N("Christmas", rgb(10, 24, 16), rgb(230, 50, 60), rgb(240, 240, 240), "Snow", "drift", "Season's greetings", "❄", sf("chime", 1.4, "major", "hall", 2, 4), { 108, 1.05, "major", "c", "dem", "h", "short", 210 })
+N("Steampunk", rgb(28, 18, 10), rgb(205, 140, 60), rgb(140, 200, 180), "Constellation", "wipe", "Gears turning", nil, sf("steam", 1, "minor", "none", 2.5, 5), { 94, 0.85, "dorian", "d", "shuf", "c", "pop", 211, 0.2 })
+N("Mainframe", rgb(4, 12, 20), rgb(0, 200, 255), rgb(255, 255, 255), "Matrix", "boot", "Access granted", nil, sf("typewriter", 1.1, "minor", "radio", 2, 4), { 124, 0.9, "minor", "a", "four", "d", "edm", 212 })
+N("Arcade", rgb(10, 6, 28), rgb(255, 214, 0), rgb(255, 60, 140), "Confetti", "pixel", "INSERT COIN", nil, sf("coin", 1.2, "major", "none", 2, 4), { 132, 1.1, "major", "e", "dem", "g", "short", 213 })
+N("Handheld", rgb(15, 56, 15), rgb(155, 188, 15), rgb(139, 172, 15), "Matrix", "pixel", "PRESS START", nil, sf("tick", 1.5, "major", "thin", 2, 4), { 120, 1.1, "major", "b", "four", "b", "short", 214 })
+N("Vampire", rgb(12, 4, 8), rgb(200, 16, 46), rgb(230, 230, 230), "Bats", "drift", "Eternal night", "🦇", sf("heart", 0.9, "harmonic", "low", 3, 5), { 72, 0.75, "harmonic", "c", "half", "e", "chill", 215 })
+N("Mocha", rgb(28, 18, 14), rgb(214, 160, 110), rgb(160, 110, 80), "Fireflies", "ripple", "Slow morning", nil, sf("steam", 0.8, "major", "hall", 3, 6), { 70, 0.9, "major", "a", "boom", "c", "chill", 216, 0.2 })
+N("Thunder", rgb(10, 10, 14), rgb(255, 225, 40), rgb(255, 255, 255), "Lightning", "lightning", "Strike!", nil, sf("thunder", 1, "minor", "cave", 3, 6), { 118, 0.8, "minor", "g", "rock", "a", "short", 217 })
+N("Oil Slick", rgb(8, 8, 14), rgb(120, 255, 200), rgb(255, 100, 220), "Plasma", "ripple", "Liquid chrome", nil, sf("wobble", 1.1, "whole", "flange", 2.5, 5), { 98, 0.9, "mixo", "l", "half", "d", "pop", 218 })
+N("Prism", rgb(16, 12, 30), rgb(255, 80, 160), rgb(80, 220, 255), "Confetti", "burst", "Every color at once", nil, sf("sparkle", 1.3, "major", "chorus", 2, 4), { 116, 1.05, "major", "b", "house", "g", "pop", 219 })
+N("Moonlight", rgb(8, 12, 26), rgb(200, 215, 255), rgb(140, 160, 220), "Stars", "eclipse", "Silver silence", nil, sf("chime", 1.2, "penta", "hall", 3, 6), { 66, 1.0, "dorian", "f", "none", "e", "chill", 220 })
+N("Coral", rgb(8, 24, 30), rgb(255, 120, 100), rgb(40, 210, 200), "Bubbles", "liquid", "Reef life", nil, sf("bubble", 1.1, "penta", "echo", 2, 4), { 102, 1.0, "mixo", "c", "dem", "c", "short", 221 })
+N("Glacier", rgb(232, 242, 250), rgb(40, 120, 200), rgb(100, 200, 230), "Snow", "drift", "Crystal clear", "❄", sf("chime", 1.5, "penta", "hall", 3, 6), { 72, 1.05, "lydian", "a", "none", "e", "chill", 222 })
+N("Paper", rgb(246, 240, 228), rgb(170, 80, 40), rgb(60, 110, 140), "Orbs", "wipe", "Fresh page", nil, sf("tick", 1, "major", "none", 3, 5), { 90, 1.0, "major", "d", "boom", "c", "short", 223 })
+N("Mint", rgb(232, 248, 242), rgb(20, 160, 120), rgb(60, 190, 220), "Bubbles", "ripple", "Cool & fresh", nil, sf("drip", 1.2, "major", "echo", 2.5, 5), { 104, 1.05, "major", "c", "house", "b", "pop", 224 })
+N("Lavender", rgb(244, 238, 252), rgb(130, 80, 220), rgb(230, 110, 200), "Orbs", "drift", "Soft dreams", "✨", sf("bell", 1.2, "lydian", "dream", 3, 6), { 76, 1.0, "lydian", "d", "half", "e", "chill", 225 })
+N("Blueprint", rgb(10, 34, 70), rgb(240, 245, 255), rgb(100, 180, 255), "Grid", "boot", "Drafting...", nil, sf("tick", 0.9, "minor", "thin", 2.5, 5), { 96, 0.9, "minor", "i", "boom", "f", "pop", 226 })
+N("Radioactive", rgb(10, 12, 4), rgb(200, 255, 0), rgb(255, 200, 0), "Ripples", "bars", "Containment breach", nil, sf("pulse", 1, "phrygian", "trem", 1.5, 3), { 130, 0.8, "phrygian", "g", "trap", "d", "edm", 227 })
+N("Noir", rgb(10, 10, 10), rgb(230, 230, 230), rgb(200, 30, 40), "Rain", "iris", "It was a dark night", nil, sf("thump", 0.9, "minor", "low", 3, 6), { 68, 0.8, "dorian", "f", "shuf", "e", "chill", 228, 0.2 })
+N("Outlaw", rgb(26, 14, 8), rgb(230, 120, 40), rgb(240, 200, 120), "Comets", "sun", "High noon", nil, sf("tick", 0.7, "dorian", "echo", 3, 6), { 86, 0.85, "mixo", "h", "shuf", "a", "pop", 229, 0.15 })
+N("Ghost", rgb(14, 16, 22), rgb(210, 225, 240), rgb(150, 170, 200), "Orbs", "drift", "Boo", "👻", sf("swell", 1.1, "harmonic", "dream", 4, 8), { 60, 0.85, "harmonic", "b", "none", "e", "chill", 230 })
+N("Quantum", rgb(6, 10, 24), rgb(0, 230, 255), rgb(190, 120, 255), "Helix", "warp", "Superposition", nil, sf("zip", 1, "whole", "flange", 2, 4), { 118, 1.0, "lydian", "l", "house", "d", "edm", 231 })
+N("Eclipse", rgb(4, 4, 6), rgb(255, 150, 40), rgb(255, 230, 160), "BeatPulse", "eclipse", "Totality", nil, sf("swell", 0.9, "phrygian", "cave", 4, 7), { 80, 0.8, "phrygian", "a", "half", "a", "pop", 232 })
+N("Rave", rgb(10, 4, 20), rgb(57, 255, 20), rgb(255, 0, 200), "Disco", "bars", "Hands up", nil, sf("stutter", 1.2, "minor", "flange", 1.5, 3), { 138, 1.0, "minor", "a", "house", "g", "edm", 233 })
+N("Bass Drop", rgb(6, 8, 14), rgb(0, 255, 170), rgb(255, 50, 120), "Equalizer", "bars", "Drop it", nil, sf("thump", 1, "minor", "dirt", 2, 4), { 146, 0.8, "phrygian", "g", "trap", "d", "edm", 234 })
+N("Hellfire", rgb(14, 2, 2), rgb(255, 50, 0), rgb(255, 160, 0), "Embers", "fire", "Burn it all", nil, sf("boom", 1, "phrygian", "grit", 3, 5), { 142, 0.75, "phrygian", "g", "rock", "g", "short", 235 })
+N("Zen", rgb(18, 22, 18), rgb(150, 200, 150), rgb(230, 220, 190), "Ripples", "ripple", "Breathe", nil, sf("gong", 0.9, "penta", "cave", 4, 8), { 56, 0.9, "major", "a", "none", "e", "chill", 236 })
+N("Atlantis", rgb(4, 22, 34), rgb(80, 230, 220), rgb(230, 200, 90), "Bubbles", "liquid", "Lost city", nil, sf("chime", 1, "lydian", "hall", 3, 6), { 72, 0.95, "lydian", "j", "half", "e", "chill", 237 })
+N("Koi", rgb(10, 20, 32), rgb(255, 120, 40), rgb(240, 240, 250), "Ripples", "ripple", "Still water", nil, sf("drip", 1, "penta", "echo", 2.5, 5), { 78, 1.0, "minor", "l", "half", "e", "chill", 238 })
+N("Olympus", rgb(24, 24, 34), rgb(250, 215, 90), rgb(255, 255, 255), "Meteors", "curtain", "Rise, champion", nil, sf("coin", 0.9, "major", "hall", 3, 5), { 100, 1.0, "major", "c", "rock", "b", "pop", 239 })
+N("Chrome", rgb(22, 24, 28), rgb(220, 225, 235), rgb(130, 140, 160), "Equalizer", "wipe", "Polished", nil, sf("zap", 0.9, "minor", "robot", 2.5, 5), { 110, 0.9, "minor", "a", "four", "c", "pop", 240 })
+N("Pixel", rgb(12, 12, 24), rgb(255, 80, 80), rgb(80, 200, 255), "Confetti", "pixel", "Level up!", nil, sf("tick", 1.6, "major", "none", 1.8, 3.5), { 126, 1.1, "major", "f", "dem", "g", "short", 241 })
+N("Theatre", rgb(22, 6, 10), rgb(200, 30, 50), rgb(250, 210, 110), "Fireworks", "curtain", "Curtain up", nil, sf("gong", 1, "harmonic", "hall", 3, 6), { 92, 0.9, "harmonic", "d", "half", "c", "pop", 242 })
+
+-- CUTSCENES
+local function frame(props, parent)
+	props.BorderSizePixel = 0
+	return new("Frame", props, parent)
+end
+local function round(f) new("UICorner", { CornerRadius = UDim.new(1, 0) }, f) end
+local function line(parent, x1, y1, x2, y2, thick, color, z)
+	local dx, dy = x2 - x1, y2 - y1
+	return new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset((x1 + x2) / 2, (y1 + y2) / 2),
+		Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), thick), Rotation = math.deg(math.atan2(dy, dx)),
+		BackgroundColor3 = color, BorderSizePixel = 0, ZIndex = z or 305,
+	}, parent)
+end
+
+local CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&@"
+local function title(c, y, soft)
+	y = y or 0.47
+	local function mk(size, dy, font)
+		local l = new("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, y + dy), Size = UDim2.new(1, -20, 0, size + 10),
+			BackgroundTransparency = 1, Text = "", TextSize = size, Font = font, TextColor3 = WHITE, ZIndex = 330,
+		}, c.ov)
+		new("UIStroke", { Color = BLACK, Thickness = 2, Transparency = 0.4 }, l)
+		return l
+	end
+	local t = mk(34, 0, Enum.Font.GothamBlack)
+	local g = mk(14, 0.075, Enum.Font.GothamMedium)
+	g.Text = c.tag
+	g.TextTransparency = 1
+	task.spawn(function()
+		if soft then
+			t.Text = c.title
+			t.TextTransparency = 1
+			tween(t, { TextTransparency = 0 }, 0.4)
+		else
+			local n, steps = #c.title, 12
+			for k = 1, steps do
+				if c.skipped() or not t.Parent then break end
+				local out = {}
+				for i = 1, n do
+					local ch = string.sub(c.title, i, i)
+					if ch == " " or i / n <= (k / steps) - 0.1 then
+						out[i] = ch
+					else
+						local r = rand(1, #CHARS)
+						out[i] = string.sub(CHARS, r, r)
+					end
+				end
+				t.Text = table.concat(out)
+				task.wait(0.03)
+			end
+			if t.Parent then t.Text = c.title end
+		end
+		if g.Parent then tween(g, { TextTransparency = 0.05 }, 0.3) end
+	end)
+	return t, g
+end
+
+local S = {}
+
+S.wipe = function(c)
+	local n = 9
+	c.sound("riser", 1.1)
+	for i = 1, n do
+		local b = frame({
+			Position = UDim2.new((i - 1) / n, 0, -1, 0), Size = UDim2.new(1 / n, 1, 1, 0),
+			BackgroundColor3 = (i % 2 == 0) and c.th.Accent or c.th.Accent2, ZIndex = 301,
+		}, c.ov)
+		task.delay((i - 1) * 0.05, function() tween(b, { Position = UDim2.new((i - 1) / n, 0, 0, 0) }, 0.38, Enum.EasingStyle.Quart) end)
+	end
+	c.wait(0.4 + n * 0.05)
+	c.cover()
+	title(c)
+	c.sound("coin")
+	c.wait(0.9)
+end
+
+S.glitch = function(c)
+	local th = c.th
+	c.ov.BackgroundColor3 = BLACK
+	local cols = { th.Accent, th.Accent2, WHITE, rgb(255, 0, 60), rgb(0, 255, 255) }
+	local live = {}
+	for stepN = 1, 12 do
+		for _, f in ipairs(live) do f:Destroy() end
+		live = {}
+		for _ = 1, 9 do
+			live[#live + 1] = frame({
+				Position = UDim2.fromScale(rand() * 0.6, rand()), Size = UDim2.new(0.2 + rand() * 0.8, 0, 0, rand(4, 46)),
+				BackgroundColor3 = cols[rand(1, 5)], BackgroundTransparency = rand() * 0.4, ZIndex = 305,
+			}, c.ov)
+		end
+		c.ov.BackgroundTransparency = stepN >= 7 and 0 or ((stepN % 2 == 0) and 0.1 or 0.5)
+		if stepN % 3 == 1 then c.sound("stutter", 0.8 + rand()) end
+		if stepN == 7 then
+			c.cover()
+			title(c)
+		end
+		c.wait(0.055)
+	end
+	for _, f in ipairs(live) do f:Destroy() end
+	c.wait(0.5)
+end
+
+S.matrix = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.25)
+	local cols = 15
+	c.sound("typewriter", 1.3)
+	for i = 1, cols do
+		local ls = {}
+		for k = 1, 24 do
+			local r = rand(1, #CHARS)
+			ls[k] = string.sub(CHARS, r, r)
+		end
+		local l = new("TextLabel", {
+			Position = UDim2.new((i - 1) / cols, 0, 0, -400), Size = UDim2.new(1 / cols, 0, 0, 380), BackgroundTransparency = 1,
+			Text = table.concat(ls, "\n"), Font = Enum.Font.Code, TextSize = 15, TextColor3 = th.Accent,
+			TextYAlignment = Enum.TextYAlignment.Bottom, ZIndex = 302,
+		}, c.ov)
+		new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ nk(0, 1), nk(1, 0) }) }, l)
+		task.delay(rand() * 0.35, function() tween(l, { Position = UDim2.new((i - 1) / cols, 0, 1, 0) }, 1.2 + rand() * 0.4, Enum.EasingStyle.Linear) end)
+	end
+	c.wait(0.45)
+	c.cover()
+	title(c)
+	c.sound("arp", 1.4)
+	c.wait(1.0)
+end
+
+S.boot = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.2)
+	local box = new("TextLabel", {
+		Position = UDim2.fromOffset(18, 24), Size = UDim2.new(1, -36, 0.5, 0), BackgroundTransparency = 1, Text = "",
+		Font = Enum.Font.Code, TextSize = 15, TextColor3 = th.Accent, TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 310,
+	}, c.ov)
+	local lines = {
+		"> boot sequence v6.0", "> mounting palette ........ OK", "> loading audio bus ....... OK",
+		"> compiling effects ....... OK", "> applying theme: " .. string.lower(c.name),
+	}
+	local text = ""
+	for k, ln in ipairs(lines) do
+		for i = 4, #ln + 3, 4 do
+			box.Text = text .. string.sub(ln, 1, i) .. "_"
+			c.wait(0.02)
+		end
+		text = text .. ln .. "\n"
+		box.Text = text .. "_"
+		c.sound("typewriter", 1 + k * 0.05)
+		if k == 3 then c.cover() end
+	end
+	c.cover()
+	title(c, 0.7)
+	c.wait(0.8)
+end
+
+S.sun = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.3)
+	c.sound("riser", 0.8)
+	local sun = frame({
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 1.1), Size = UDim2.fromOffset(230, 230),
+		BackgroundColor3 = WHITE, ZIndex = 302,
+	}, c.ov)
+	round(sun)
+	new("UIGradient", { Rotation = 90, Color = ColorSequence.new(th.Accent2, th.Accent) }, sun)
+	for k, y in ipairs({ 0.56, 0.66, 0.75, 0.83, 0.9 }) do
+		frame({ Position = UDim2.fromScale(0, y), Size = UDim2.fromScale(1, 0.012 + k * 0.012), BackgroundColor3 = th.Background, ZIndex = 303 }, sun)
+	end
+	tween(sun, { Position = UDim2.fromScale(0.5, 0.4) }, 1.0, Enum.EasingStyle.Quart)
+	local floor = frame({ Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromScale(1, 0.5), BackgroundColor3 = th.Background, ZIndex = 304 }, c.ov)
+	for k = 0, 6 do
+		frame({
+			Position = UDim2.fromScale(0, (k / 6) ^ 2), Size = UDim2.new(1, 0, 0, 2), BackgroundColor3 = th.Accent2,
+			BackgroundTransparency = 0.3, ZIndex = 305,
+		}, floor)
+	end
+	c.wait(0.85)
+	c.cover()
+	title(c, 0.72)
+	c.sound("chime", 1)
+	c.wait(0.9)
+end
+
+S.slash = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.15)
+	for i, ang in ipairs({ -28, 22, -6 }) do
+		local l = frame({
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 0, 0, 4),
+			Rotation = ang, BackgroundColor3 = WHITE, ZIndex = 305,
+		}, c.ov)
+		new("UIStroke", { Color = th.Accent, Thickness = 5, Transparency = 0.3 }, l)
+		tween(l, { Size = UDim2.new(1.7, 0, 0, 4) }, 0.1, Enum.EasingStyle.Quad)
+		c.sound("zap", 0.9 + i * 0.25)
+		local fl = frame({ Size = UDim2.fromScale(1, 1), BackgroundColor3 = i == 3 and th.Accent or WHITE, BackgroundTransparency = 0.55, ZIndex = 304 }, c.ov)
+		tween(fl, { BackgroundTransparency = 1 }, 0.2)
+		c.wait(0.17)
+	end
+	c.cover()
+	c.sound("gong")
+	title(c)
+	c.wait(0.9)
+end
+
+S.eclipse = function(c)
+	local th = c.th
+	c.solid(BLACK, 0.35)
+	local function disk(color, z)
+		local d = frame({
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 0),
+			BackgroundColor3 = color, ZIndex = z,
+		}, c.ov)
+		round(d)
+		return d
+	end
+	local corona, body = disk(th.Accent, 302), disk(th.Background, 303)
+	c.sound("swell", 1)
+	tween(corona, { Size = UDim2.fromOffset(c.R + 40, c.R + 40) }, 1.0, Enum.EasingStyle.Quart)
+	task.delay(0.1, function() tween(body, { Size = UDim2.fromOffset(c.R, c.R) }, 1.0, Enum.EasingStyle.Quart) end)
+	c.wait(1.0)
+	c.cover()
+	title(c, 0.47, true)
+	c.wait(1.0)
+end
+
+S.iris = function(c)
+	local top = frame({ Size = UDim2.fromScale(1, 0), BackgroundColor3 = BLACK, ZIndex = 302 }, c.ov)
+	local bot = frame({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0), BackgroundColor3 = BLACK, ZIndex = 302 }, c.ov)
+	c.sound("thump", 0.9)
+	tween(top, { Size = UDim2.fromScale(1, 0.52) }, 0.5, Enum.EasingStyle.Quart)
+	tween(bot, { Size = UDim2.fromScale(1, 0.52) }, 0.5, Enum.EasingStyle.Quart)
+	c.wait(0.55)
+	c.cover()
+	for k = 1, 6 do
+		top.BackgroundColor3 = (k % 2 == 0) and rgb(24, 24, 24) or BLACK
+		bot.BackgroundColor3 = top.BackgroundColor3
+		c.wait(0.04)
+	end
+	title(c)
+	c.wait(0.9)
+end
+
+S.lightning = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.2)
+	for k = 1, 3 do
+		local fl = frame({ Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.1, ZIndex = 306 }, c.ov)
+		tween(fl, { BackgroundTransparency = 1 }, 0.25)
+		local x, y = c.W * (0.2 + rand() * 0.6), 0
+		while y < c.H * (0.5 + k * 0.1) do
+			local nx, ny = x + (rand() - 0.5) * 90, y + 30 + rand() * 50
+			line(c.ov, x, y, nx, ny, 3, th.Accent2, 304)
+			line(c.ov, x, y, nx, ny, 1.5, WHITE, 305)
+			x, y = nx, ny
+		end
+		c.sound("thunder", 0.9 + k * 0.1)
+		if k == 2 then c.cover() end
+		c.wait(0.22)
+	end
+	title(c)
+	c.wait(0.8)
+end
+
+S.fire = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.25)
+	c.sound("boom", 1)
+	local n = 14
+	for i = 1, n do
+		local f = frame({
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.new((i - 1) / n, 0, 1, 0), Size = UDim2.new(1 / n, 1, 0, 0),
+			BackgroundColor3 = WHITE, ZIndex = 302,
+		}, c.ov)
+		new("UIGradient", { Rotation = 90, Color = ColorSequence.new(th.Accent, th.Accent2) }, f)
+		task.delay(rand() * 0.25, function() tween(f, { Size = UDim2.new(1 / n, 1, 1.25, 0) }, 0.7 + rand() * 0.3, Enum.EasingStyle.Quad) end)
+	end
+	c.wait(1.05)
+	c.cover()
+	title(c)
+	c.wait(0.9)
+end
+
+S.ripple = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.3)
+	for k = 1, 4 do
+		task.delay((k - 1) * 0.18, function()
+			local r = frame({
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(10, 10),
+				BackgroundTransparency = 1, ZIndex = 302,
+			}, c.ov)
+			round(r)
+			new("UIStroke", { Color = (k % 2 == 0) and th.Accent or th.Accent2, Thickness = 3, Transparency = 0.1 }, r)
+			tween(r, { Size = UDim2.fromOffset(c.R, c.R) }, 1.0, Enum.EasingStyle.Quad)
+			c.sound("drip", 0.8 + k * 0.15)
+		end)
+	end
+	c.wait(0.8)
+	c.cover()
+	title(c, 0.47, true)
+	c.wait(1.0)
+end
+
+S.pixel = function(c)
+	local th = c.th
+	local cols, rows = 10, 16
+	c.sound("tick", 1)
+	local palette = { th.Accent, th.Accent2, th.Background, th.Accent:Lerp(th.Background, 0.5) }
+	for i = 0, cols - 1 do
+		for j = 0, rows - 1 do
+			local f = frame({
+				Position = UDim2.new(i / cols, 0, j / rows, 0), Size = UDim2.new(1 / cols, 1, 1 / rows, 1),
+				BackgroundColor3 = palette[rand(1, 4)], BackgroundTransparency = 1, ZIndex = 301,
+			}, c.ov)
+			task.delay(rand() * 0.6, function() f.BackgroundTransparency = 0 end)
+		end
+	end
+	c.wait(0.75)
+	c.cover()
+	c.sound("coin")
+	title(c)
+	c.wait(0.9)
+end
+
+S.drift = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.5)
+	c.sound("chime", 1)
+	for _ = 1, 26 do
+		local g = new("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(rand(), 0, 0, -30), Size = UDim2.fromOffset(32, 32),
+			BackgroundTransparency = 1, Text = c.glyph or "✦", TextSize = rand(18, 34), Font = Enum.Font.GothamBold,
+			TextColor3 = th.Accent, ZIndex = 302,
+		}, c.ov)
+		task.delay(rand() * 0.6, function()
+			tween(g, { Position = UDim2.new(g.Position.X.Scale + (rand() - 0.5) * 0.3, 0, 1, 30), Rotation = rand(-300, 300) }, 1.2 + rand() * 0.8, Enum.EasingStyle.Sine)
+		end)
+	end
+	c.wait(0.55)
+	c.cover()
+	title(c, 0.47, true)
+	c.wait(1.1)
+end
+
+S.warp = function(c)
+	local th = c.th
+	c.solid(BLACK, 0.2)
+	c.sound("riser", 1.2)
+	for _ = 1, 46 do
+		local f = frame({
+			AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(2, 1 + rand() * 2),
+			Rotation = rand() * 360, BackgroundColor3 = ({ th.Accent, th.Accent2, WHITE })[rand(1, 3)], ZIndex = 302,
+		}, c.ov)
+		task.delay(rand() * 0.5, function() tween(f, { Size = UDim2.fromOffset(c.R, 3) }, 0.55, Enum.EasingStyle.Quad) end)
+	end
+	c.wait(0.65)
+	local fl = frame({ Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.2, ZIndex = 306 }, c.ov)
+	tween(fl, { BackgroundTransparency = 1 }, 0.4)
+	c.cover()
+	title(c)
+	c.wait(0.9)
+end
+
+S.curtain = function(c)
+	local th = c.th
+	local function panel(anchorX)
+		local p = frame({
+			AnchorPoint = Vector2.new(anchorX, 0), Position = UDim2.fromScale(anchorX, 0), Size = UDim2.fromScale(0, 1),
+			BackgroundColor3 = WHITE, ZIndex = 302,
+		}, c.ov)
+		new("UIGradient", { Color = ColorSequence.new(th.Accent, th.Accent:Lerp(BLACK, 0.55)) }, p)
+		frame({
+			AnchorPoint = Vector2.new(1 - anchorX, 0), Position = UDim2.fromScale(1 - anchorX, 0), Size = UDim2.new(0, 5, 1, 0),
+			BackgroundColor3 = th.Accent2, ZIndex = 303,
+		}, p)
+		tween(p, { Size = UDim2.fromScale(0.51, 1) }, 0.7, Enum.EasingStyle.Quart)
+	end
+	c.sound("riser", 0.7)
+	panel(0)
+	panel(1)
+	c.wait(0.8)
+	c.cover()
+	c.sound("coin")
+	title(c)
+	c.wait(0.9)
+end
+
+S.liquid = function(c)
+	local th = c.th
+	c.sound("wind", 1.1)
+	local water = frame({ Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 1.2), BackgroundColor3 = WHITE, ZIndex = 302 }, c.ov)
+	new("UIGradient", { Rotation = 90, Color = ColorSequence.new(th.Accent2, th.Accent) }, water)
+	local blobs = {}
+	for i = 0, 11 do
+		local b = frame({
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(i / 11, 0, 0, 0), Size = UDim2.fromOffset(c.W / 7, 46),
+			BackgroundColor3 = th.Accent2, ZIndex = 302,
+		}, water)
+		round(b)
+		blobs[i + 1] = b
+	end
+	tween(water, { Position = UDim2.fromScale(0, -0.15) }, 1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	local t0 = os.clock()
+	local conn = RunService.RenderStepped:Connect(function()
+		local t = os.clock() - t0
+		for i, b in ipairs(blobs) do b.Position = UDim2.new((i - 1) / 11, 0, 0, math.sin(t * 5 + i) * 9) end
+	end)
+	c.wait(1.15)
+	conn:Disconnect()
+	c.cover()
+	title(c, 0.5, true)
+	c.wait(0.9)
+end
+
+S.burst = function(c)
+	local th = c.th
+	c.sound("sparkle", 1.2)
+	local cx, cy = c.W / 2, c.H / 2
+	local core = frame({
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(0, 0),
+		BackgroundColor3 = th.Accent, ZIndex = 302,
+	}, c.ov)
+	round(core)
+	tween(core, { Size = UDim2.fromOffset(c.R, c.R) }, 0.7, Enum.EasingStyle.Quart)
+	for k = 1, 4 do
+		task.delay(k * 0.06, function() burst(c.ov, cx, cy, ({ th.Accent2, WHITE, th.Accent2, WHITE })[k], 14, 260, 310) end)
+	end
+	c.wait(0.6)
+	c.cover()
+	c.sound("coin")
+	title(c)
+	c.wait(1.0)
+end
+
+S.bars = function(c)
+	local th = c.th
+	c.solid(th.Background, 0.15)
+	local n = 12
+	local bars = {}
+	for i = 1, n do
+		bars[i] = frame({
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.new((i - 1) / n, 0, 1, 0), Size = UDim2.new(1 / n, -2, 0, 0),
+			BackgroundColor3 = th.Accent:Lerp(th.Accent2, i / n), ZIndex = 302,
+		}, c.ov)
+	end
+	for beat = 1, 3 do
+		for _, b in ipairs(bars) do
+			tween(b, { Size = UDim2.new(1 / n, -2, beat * 0.26 * (0.6 + rand() * 0.4), 0) }, 0.1)
+		end
+		c.sound(beat % 2 == 1 and "thump" or "stutter", 1 + beat * 0.1)
+		c.wait(0.16)
+	end
+	for _, b in ipairs(bars) do tween(b, { Size = UDim2.new(1 / n, 0, 1, 0) }, 0.12) end
+	c.wait(0.15)
+	local fl = frame({ Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.3, ZIndex = 306 }, c.ov)
+	tween(fl, { BackgroundTransparency = 1 }, 0.4)
+	c.cover()
+	c.sound("boom")
+	title(c)
+	c.wait(0.8)
+end
+
+UI.Cutscenes = S
+
+function UI.PlayCutscene(Win, name, apply)
+	local key = UI.ThemeAliases[name] or name
+	local th, meta = UI.Themes[key], UI.ThemeCut[key]
+	local scene = meta and S[meta[1]]
+	if not (th and scene) then
+		apply()
+		Win._cutBusy = false
+		return
+	end
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	local ov = new("TextButton", {
+		Name = "Cutscene", Size = UDim2.fromScale(1, 1), BackgroundColor3 = BLACK, BackgroundTransparency = 1, Text = "",
+		AutoButtonColor = false, ZIndex = 300, ClipsDescendants = true,
+	}, Win.ScreenGui)
+	local skip, applied = false, false
+	ov.Activated:Connect(function() skip = true end)
+	local c = {
+		ov = ov, th = th, name = key, title = string.upper(key), tag = meta[2] or "", glyph = meta[3],
+		W = vp.X, H = vp.Y, R = math.max(vp.X, vp.Y) * 1.6,
+	}
+	c.skipped = function() return skip end
+	c.wait = function(t)
+		local e = os.clock() + t
+		while os.clock() < e and not skip do task.wait() end
+	end
+	c.cover = function()
+		if not applied then
+			applied = true
+			apply()
+		end
+	end
+	c.solid = function(color, t)
+		ov.BackgroundColor3 = color
+		tween(ov, { BackgroundTransparency = 0 }, t or 0.3)
+	end
+	c.sound = function(a, f, ch) UI.PlaySfxRecipe(a, f, ch, key) end
+	c.fade = function(t)
+		local function f(o)
+			local g = {}
+			if o:IsA("GuiObject") then g.BackgroundTransparency = 1 end
+			if o:IsA("TextLabel") or o:IsA("TextButton") then g.TextTransparency = 1 end
+			if o:IsA("ImageLabel") then g.ImageTransparency = 1 end
+			if next(g) then tween(o, g, t, Enum.EasingStyle.Quad) end
+			if o:IsA("UIStroke") then tween(o, { Transparency = 1 }, t) end
+		end
+		f(ov)
+		for _, d in ipairs(ov:GetDescendants()) do f(d) end
+		c.wait(t)
+	end
+	task.spawn(function()
+		local ok, err = pcall(scene, c)
+		if not ok then warn("[IncrementalUi] cutscene error: " .. tostring(err)) end
+		c.cover()
+		c.fade(0.45)
+		ov:Destroy()
+		Win._cutBusy = false
+	end)
+end
+
+local origCreate = UI.CreateWindow
+function UI:CreateWindow(options)
+	local W = origCreate(self, options)
+	local origSet = W.SetTheme
+	function W:SetTheme(name)
+		if UI.CutscenesEnabled and type(name) == "string" and not W._cutBusy and name ~= W.ThemeName then
+			W._cutBusy = true
+			UI.PlayCutscene(W, name, function() origSet(W, name) end)
+			return true
+		end
+		return origSet(W, name)
+	end
+
+	local st = W.Tabs[1]
+	if st and st.CreateSection then
+		local sec = st:CreateSection("Cutscenes & Theme Audio")
+		sec:CreateToggle({ Name = "Theme Cutscenes", CurrentValue = UI.CutscenesEnabled, Callback = function(v) UI.CutscenesEnabled = v end })
+		sec:CreateToggle({ Name = "Theme Signature Sounds", CurrentValue = UI.ThemeSfxEnabled, Callback = function(v) UI.ThemeSfxEnabled = v end })
+		sec:CreateButton({
+			Name = "Replay Theme Cutscene",
+			Callback = function()
+				if W._cutBusy then return end
+				W._cutBusy = true
+				UI.PlayCutscene(W, W.ThemeName, function() end)
+			end,
+		})
+	end
+
+	task.spawn(function()
+		while not W.Destroyed and W.ScreenGui.Parent do
+			local cfg = UI.ThemeSfx[W.ThemeName]
+			local lo, hi = 2.5, 5
+			if cfg then lo, hi = cfg.i[1], cfg.i[2] end
+			task.wait(lo + rand() * (hi - lo))
+			if cfg and UI.ThemeSfxEnabled and W.Visible and not W._cutBusy and not UI.Music.Playing then
+				UI.PlayThemeSfx(W.ThemeName)
+			end
+		end
+	end)
+	return W
+end
+
+-- the old shared ambient pings (the repeating "Water" spam in Storm etc.) are replaced by the per-theme sounds above
+for _, p in pairs(UI.FxSfx) do p[4] = 0 end
 end
 
 return UI
