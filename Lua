@@ -13,11 +13,13 @@ local TextService = game:GetService("TextService")
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
+local LogService = game:GetService("LogService")
 local Player = Players.LocalPlayer
 
 UI.Version = "5.1.0"
 UI.Windows = {}
 UI.AntiAfk = false
+UI.AutoSave = false
 
 local rgb = Color3.fromRGB
 
@@ -60,7 +62,7 @@ UI.Themes = {
         Background = rgb(16, 16, 16), Sidebar = rgb(20, 20, 20), Section = rgb(24, 24, 24),
         Element = rgb(30, 30, 30), ElementHover = rgb(39, 39, 39),
         Accent = rgb(235, 235, 235), Accent2 = rgb(130, 130, 130), AccentText = rgb(16, 16, 16),
-        Text = rgb(238, 238, 238), Muted = rgb(140, 140, 140), Border = rgb(50, 50, 50),
+        Text = rgb(238, 238, 238), Muted = rgb(140, 140, 140), Border = rgb(50, 50, 50), Fx = "Matrix"
     }),
     Light = mk({
         Background = rgb(243, 244, 247), Sidebar = rgb(235, 237, 242), Section = rgb(255, 255, 255),
@@ -152,11 +154,11 @@ UI.ThemeOrder = {
     "Frost", "Sakura", "Inferno", "Ocean", "Matrix", "Nebula", "Aurora", "Cyberpunk", "Forest", "Storm",
 }
 function UI:GetThemeNames() return table.clone(UI.ThemeOrder) end
-UI.ThemeAliases = { GrayBlack = "GreyWhite", Grey = "GreyWhite", Gray = "GreyWhite", White = "Light", Dark = "Midnight", Purple = "Amethyst" }
+UI.ThemeAliases = { GrayBlack = "Graphite", Grey = "Graphite", Gray = "Graphite", White = "Light", Dark = "Midnight", Purple = "Amethyst" }
 
 local function resolveTheme(name)
     if type(name) == "table" then
-        local t = table.clone(UI.Themes.GreyWhite)
+        local t = table.clone(UI.Themes.Graphite)
         for k, v in pairs(name) do if typeof(v) == "Color3" then t[k] = v end end
         if type(name.Fx) == "string" then t.Fx = name.Fx end
         if typeof(name.Accent) == "Color3" and typeof(name.Accent2) ~= "Color3" then
@@ -165,7 +167,7 @@ local function resolveTheme(name)
         return t
     end
     local n = UI.ThemeAliases[name] or name
-    return table.clone(UI.Themes[n] or UI.Themes.GreyWhite)
+    return table.clone(UI.Themes[n] or UI.Themes.Graphite)
 end
 
 --==== UTILITIES ====--
@@ -424,7 +426,6 @@ function UI:CreateKeySystem(options)
         errorLbl.TextTransparency = 0
     end)
 
-    -- YOUR EXACT LOGIC HERE
     local function attempt()
         if isChecking then return end
 
@@ -450,7 +451,6 @@ function UI:CreateKeySystem(options)
         errorLbl.TextTransparency = 0
         submitBtn.Text = "Checking..."
 
-        -- Run in a task to prevent freezing the UI while HTTP request happens
         task.spawn(function()
             local callOk, valid, message = pcall(verifyKey, enteredKey)
 
@@ -468,7 +468,6 @@ function UI:CreateKeySystem(options)
 
                 if blur then blur:Destroy() end
                 
-                -- Force UI to vanish before loading script
                 gui.Enabled = false
                 gui:Destroy()
 
@@ -507,7 +506,7 @@ end
 --==== MAIN WINDOW ====--
 function UI:CreateWindow(options)
     options = options or {}
-    local theme = resolveTheme(options.Theme or "GreyWhite")
+    local theme = resolveTheme(options.Theme or "Graphite")
     local themeName = type(options.Theme) == "string" and options.Theme or "Custom"
     local windowName = options.Name or "IncrementalUi"
 
@@ -639,7 +638,7 @@ function UI:CreateWindow(options)
     local Window = {
         ScreenGui = gui, Root = root, Main = main, Tabs = {}, ActiveTab = nil, Config = {}, NamedConfigs = {},
         Controls = {}, Theme = theme, ThemeName = themeName, Visible = true, Destroyed = false,
-        Keybind = options.Keybind or Enum.KeyCode.RightControl, _dd = nil, _fpsLabel = nil
+        Keybind = options.Keybind or Enum.KeyCode.RightControl, _dd = nil, _fpsLabel = nil, _autoSave = false
     }
     table.insert(UI.Windows, Window)
 
@@ -913,7 +912,7 @@ function UI:CreateWindow(options)
         end)
     end
 
-    Window.Fx = "Bats"
+    Window.Fx = "Matrix"
     Window.FxOverride = options.Fx
     local function applyFx(name)
         fxToken += 1
@@ -927,7 +926,7 @@ function UI:CreateWindow(options)
         if name == nil or name == "Theme" or name == "Theme Default" then Window.FxOverride = nil else Window.FxOverride = name end
         applyFx(Window.FxOverride or theme.Fx or "Bats")
     end
-    applyFx(Window.FxOverride or theme.Fx or "Bats")
+    applyFx(Window.FxOverride or theme.Fx or "Matrix")
 
     local function toMain(pos)
         local s = uiScale.Scale
@@ -1302,6 +1301,11 @@ function UI:CreateWindow(options)
             tween(shadow, { ImageTransparency = 1 }, 0.2)
             task.delay(0.26, function() if visToken == tok then root.Visible = false end end)
             showLauncher()
+            
+            -- Auto-save logic
+            if Window._autoSave then
+                Window:SaveToFile("autosave")
+            end
         end
     end
     function Window:Toggle() Window:SetVisible(not Window.Visible) end
@@ -2022,6 +2026,17 @@ function UI:CreateWindow(options)
         CurrentValue = UI.AntiAfk,
         Callback = function(v) UI.AntiAfk = v end,
     })
+    utilitySec:CreateToggle({
+        Name = "Remember Settings",
+        CurrentValue = UI.AutoSave,
+        Callback = function(v) 
+            UI.AutoSave = v 
+            Window._autoSave = v
+            if v then
+                Window:LoadFromFile("autosave")
+            end
+        end,
+    })
     if Window._fpsLabel then
         utilitySec:CreateToggle({
             Name = "Show FPS Counter",
@@ -2036,51 +2051,51 @@ function UI:CreateWindow(options)
         end,
     })
 
-    local configSec = settingsTab:CreateSection("Configuration")
-    local configNameBox = configSec:CreateTextbox({
-        Name = "Config Name",
-        PlaceholderText = "my_config",
-        CurrentValue = "default",
-    })
-    configSec:CreateButton({
-        Name = "Save Config",
-        Callback = function()
-            local name = configNameBox.GetValue()
-            Window:SaveConfig(name)
-            Window:Notify({ Title = "Saved", Content = "Config: " .. name, Type = "Success" })
-        end,
-    })
-    configSec:CreateButton({
-        Name = "Load Config",
-        Callback = function()
-            local name = configNameBox.GetValue()
-            local ok = Window:LoadConfig(name)
-            if ok then
-                Window:Notify({ Title = "Loaded", Content = "Config: " .. name, Type = "Success" })
-            else
-                Window:Notify({ Title = "Error", Content = "Config not found", Type = "Error" })
+    -- ============================================================
+    -- DEVELOPER CONSOLE
+    -- ============================================================
+    local consoleSec = settingsTab:CreateSection("Developer Console")
+    local consoleFrame = new("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 0, 150), BackgroundColor3 = theme.Background, BorderSizePixel = 0,
+        ScrollBarThickness = 4, ScrollBarImageColor3 = theme.Border, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    }, consoleSec.Frame)
+    corner(consoleFrame, 6)
+    strokeT(consoleFrame, "Border", 1, 0.5)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, consoleFrame)
+    local consoleLayout = new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Bottom }, consoleFrame)
+
+    local consoleMsgs = 0
+    local logConn = LogService.MessageOut:Connect(function(msg, msgType)
+        if not consoleFrame.Parent then return end
+        if consoleMsgs > 100 then
+            if consoleFrame:GetChildren()[1] and consoleFrame:GetChildren()[1]:IsA("TextLabel") then
+                consoleFrame:GetChildren()[1]:Destroy()
             end
-        end,
-    })
-    configSec:CreateButton({
-        Name = "Export to Clipboard",
-        Callback = function()
-            local json = Window:ExportConfig()
-            local ok = pcall(function() setclipboard(json) end)
-            if ok then
-                Window:Notify({ Title = "Exported", Content = "Copied JSON to clipboard!", Type = "Success" })
-            else
-                Window:Notify({ Title = "Error", Content = "Failed to copy.", Type = "Error" })
-            end
-        end,
-    })
+        else
+            consoleMsgs += 1
+        end
+        
+        local color = theme.Text
+        if msgType == Enum.MessageType.MessageError then color = theme.Danger
+        elseif msgType == Enum.MessageType.MessageWarning then color = theme.Warning
+        elseif msgType == Enum.MessageType.MessageInfo then color = theme.Accent end
+
+        local l = new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+            Text = "> " .. msg, TextColor3 = color, Font = Enum.Font.Code, TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+        }, consoleFrame)
+        task.defer(function() consoleFrame.CanvasPosition = Vector2.new(0, consoleFrame.AbsoluteCanvasSize.Y) end)
+    end)
 
     function Window:Destroy()
         if Window.Destroyed then return end
+        if logConn then logConn:Disconnect() end
         gui:Destroy()
     end
     gui.Destroying:Connect(function()
         Window.Destroyed = true
+        if logConn then logConn:Disconnect() end
         for _, c in ipairs(conns) do c:Disconnect() end
         for i, w in ipairs(UI.Windows) do
             if w == Window then table.remove(UI.Windows, i) break end
