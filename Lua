@@ -1,9 +1,11 @@
 --[[
-    IncrementalUi v5.3.0 — Advanced Effects + Sound Edition
-    - 13 new effects (Warp, Vortex, Lightning, Constellation, Fireworks, Equalizer, Waves, Glitch, Helix, Orbs, Confetti, Comets, Ripples)
-    - Full sound system with per-effect SFX profiles
-    - Theme→effect auto-mapping
-    - Sound volume/mute controls in Settings
+    IncrementalUi v5.4.0 — Sound Fix + Music Engine + Themes + Effects Edition
+    - Fixed sound volume (no more quiet playback)
+    - Full music engine (drum machine + custom tracks)
+    - 10 new themes (Synthwave, Lava, Arctic, Candy, Terminal, Royal, Bloodmoon, Tokyo, Riot, Deepsea)
+    - 8 new beat-reactive effects (BeatPulse, Disco, RingViz, Plasma, Tunnel, Meteors, Radar, Chaos)
+    - Sound packs (Soft, Crisp, Retro, Deep)
+    - Theme-aware auto-music
 ]]
 
 local UI = {}
@@ -18,51 +20,93 @@ local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
 local LogService = game:GetService("LogService")
 local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+local ContentProvider = game:GetService("ContentProvider")
 local Player = Players.LocalPlayer
 
-UI.Version = "5.3.0"
+UI.Version = "5.4.0"
 UI.Windows = {}
 UI.AntiAfk = false
 UI.AutoSave = false
-UI.SoundEnabled = true
-UI.SoundVolume = 0.5
 
 local rgb = Color3.fromRGB
+local o = false -- "rest" marker used in melodies below
 
-UI.Sounds = {
-    Ping   = "rbxasset://sounds/electronicpingshort.wav",
-    Switch = "rbxasset://sounds/switch.wav",
-    Snap   = "rbxasset://sounds/snap.mp3",
-    Water  = "rbxasset://sounds/impact_water.mp3",
-    Bass   = "rbxasset://sounds/bass.wav",
-}
+UI.SoundEnabled = true
+UI.SoundVolume = 0.7
+UI.SoundGain = 3
+UI.SoundPack = "Crisp"
+UI.SoundPacks = { Soft = { 0.9, 0.7 }, Crisp = { 1, 1 }, Retro = { 1.6, 0.9 }, Deep = { 0.6, 1.1 } }
 
-UI.FxSfx = {
-    Bats          = { "Snap",   2.4, 0.25, 2.0 },
-    Snow          = { "Ping",   2.2, 0.18, 3.2 },
-    Sakura        = { "Ping",   1.7, 0.16, 3.6 },
-    Embers        = { "Snap",   0.8, 0.30, 1.0 },
-    Bubbles       = { "Water",  1.7, 0.30, 1.6 },
-    Matrix        = { "Ping",   3.2, 0.14, 0.55 },
-    Stars         = { "Ping",   2.8, 0.14, 2.4 },
-    Aurora        = { "Bass",   0.55, 0.30, 4.5 },
-    Grid          = { "Switch", 0.7, 0.30, 2.8 },
-    Fireflies     = { "Ping",   2.4, 0.12, 2.0 },
-    Rain          = { "Water",  2.4, 0.18, 0.45 },
-    Orbs          = { "Bass",   0.8, 0.25, 3.2 },
-    Confetti      = { "Snap",   1.5, 0.25, 0.9 },
-    Comets        = { "Switch", 2.2, 0.25, 2.6 },
-    Ripples       = { "Water",  1.3, 0.30, 1.2 },
-    Warp          = { "Bass",   0.5, 0.35, 0 },
-    Vortex        = { "Bass",   0.45, 0.35, 3.8 },
-    Lightning     = { "Water",  2.0, 0.12, 0.5 },
-    Constellation = { "Ping",   2.6, 0.14, 1.6 },
-    Fireworks     = { "Snap",   1.0, 0.50, 0 },
-    Equalizer     = { "Bass",   1.1, 0.40, 0 },
-    Waves         = { "Water",  0.7, 0.35, 3.4 },
-    Glitch        = { "Snap",   0.5, 0.40, 0 },
-    Helix         = { "Ping",   1.5, 0.14, 1.1 },
+UI.MusicEnabled = true
+UI.MusicVolume = 0.35
+UI.AutoMusic = true
+UI.MusicChoice = "Auto"
+UI.Tracks = {}
+UI._beat, UI._beatId, UI._metro = 0, 0, 0
+
+UI.SoundCandidates = {
+    Ping   = { "rbxasset://sounds/electronicpingshort.wav", "rbxasset://sounds/button.wav", "rbxasset://sounds/clickfast.wav" },
+    Switch = { "rbxasset://sounds/switch.wav", "rbxasset://sounds/button.wav", "rbxasset://sounds/clickfast.wav" },
+    Snap   = { "rbxasset://sounds/snap.mp3", "rbxasset://sounds/clickfast.wav", "rbxasset://sounds/button.wav" },
+    Water  = { "rbxasset://sounds/impact_water.mp3", "rbxasset://sounds/splat.wav", "rbxasset://sounds/snap.mp3" },
+    Bass   = { "rbxasset://sounds/bass.wav", "rbxasset://sounds/impact_water.mp3", "rbxasset://sounds/snap.mp3" },
 }
+UI.Sounds = {}
+UI.SoundStatus = {}
+for name, list in pairs(UI.SoundCandidates) do UI.Sounds[name] = list[1] end
+
+task.spawn(function()
+    task.wait(2)
+    for name, list in pairs(UI.SoundCandidates) do
+        if UI.Sounds[name] ~= list[1] then
+            UI.SoundStatus[name] = true
+        else
+            local picked
+            for _, id in ipairs(list) do
+                pcall(function()
+                    local s = Instance.new("Sound")
+                    s.SoundId = id
+                    s.Parent = SoundService
+                    ContentProvider:PreloadAsync({ s })
+                    if s.IsLoaded and s.TimeLength > 0 then picked = id end
+                    s:Destroy()
+                end)
+                if picked then break end
+            end
+            UI.SoundStatus[name] = picked ~= nil
+            if picked then
+                UI.Sounds[name] = picked
+            else
+                warn("[IncrementalUi] sample '" .. name .. "' could not load. Set UI.Sounds." .. name .. ' = "rbxassetid://..." to your own audio.')
+            end
+        end
+    end
+end)
+
+function UI:TestSounds()
+    local lines, allOk = {}, true
+    for name in pairs(UI.SoundCandidates) do
+        local id = UI.Sounds[name]
+        local ok, info = false, "no id"
+        if id then
+            local s = Instance.new("Sound")
+            s.SoundId = id
+            s.Volume = 1
+            s.Parent = SoundService
+            pcall(function() ContentProvider:PreloadAsync({ s }) end)
+            pcall(function() s:Play() end)
+            task.wait(0.4)
+            ok = s.IsLoaded and s.TimeLength > 0
+            info = ok and "ok" or "FAILED"
+            s:Destroy()
+        end
+        if not ok then allOk = false end
+        table.insert(lines, name .. ": " .. info)
+    end
+    table.sort(lines)
+    return table.concat(lines, ", "), allOk
+end
 
 local sfxLast = {}
 local function sfx(base, vol, pitch, cd)
@@ -72,18 +116,218 @@ local function sfx(base, vol, pitch, cd)
     local now = os.clock()
     if now - (sfxLast[base] or 0) < (cd or 0.04) then return end
     sfxLast[base] = now
+    local pack = UI.SoundPacks[UI.SoundPack] or { 1, 1 }
     pcall(function()
         local s = Instance.new("Sound")
         s.SoundId = id
-        s.Volume = math.clamp((vol or 0.5) * UI.SoundVolume, 0, 5)
-        s.PlaybackSpeed = math.clamp(pitch or 1, 0.2, 4)
+        s.Volume = math.clamp((vol or 0.5) * UI.SoundVolume * UI.SoundGain * pack[2], 0, 10)
+        s.PlaybackSpeed = math.clamp((pitch or 1) * pack[1], 0.2, 4)
         s.Parent = SoundService
         s.Ended:Connect(function() s:Destroy() end)
         s:Play()
-        task.delay(5, function() if s.Parent then s:Destroy() end end)
+        Debris:AddItem(s, 6)
     end)
 end
 UI.PlaySound = sfx
+
+UI.FxSfx = {
+    Bats = { "Snap", 2.4, 0.25, 2.0 }, Snow = { "Ping", 2.2, 0.18, 3.2 }, Sakura = { "Ping", 1.7, 0.16, 3.6 },
+    Embers = { "Snap", 0.8, 0.30, 1.0 }, Bubbles = { "Water", 1.7, 0.30, 1.6 }, Matrix = { "Ping", 3.2, 0.14, 0.55 },
+    Stars = { "Ping", 2.8, 0.14, 2.4 }, Aurora = { "Bass", 0.55, 0.30, 4.5 }, Grid = { "Switch", 0.7, 0.30, 2.8 },
+    Fireflies = { "Ping", 2.4, 0.12, 2.0 }, Rain = { "Water", 2.4, 0.18, 0.45 }, Orbs = { "Bass", 0.8, 0.25, 3.2 },
+    Confetti = { "Snap", 1.5, 0.25, 0.9 }, Comets = { "Switch", 2.2, 0.25, 2.6 }, Ripples = { "Water", 1.3, 0.30, 1.2 },
+    Warp = { "Bass", 0.5, 0.35, 0 }, Vortex = { "Bass", 0.45, 0.35, 3.8 }, Lightning = { "Water", 2.0, 0.12, 0.5 },
+    Constellation = { "Ping", 2.6, 0.14, 1.6 }, Fireworks = { "Snap", 1.0, 0.50, 0 }, Equalizer = { "Bass", 1.1, 0.40, 0 },
+    Waves = { "Water", 0.7, 0.35, 3.4 }, Glitch = { "Snap", 0.5, 0.40, 0 }, Helix = { "Ping", 1.5, 0.14, 1.1 },
+    Tunnel = { "Switch", 0.9, 0.25, 2.2 }, Radar = { "Ping", 2.4, 0.20, 0 }, Plasma = { "Bass", 0.6, 0.25, 3.5 },
+    Meteors = { "Snap", 0.5, 0.30, 0 }, RingViz = { "Bass", 1.0, 0.30, 0 }, BeatPulse = { "Bass", 1.0, 0.30, 0 },
+    Disco = { "Snap", 1.2, 0.30, 0 }, Chaos = { "Snap", 1.0, 0.30, 0 },
+}
+
+local INS = { K = { "Bass", 1.0, 1.0 }, S = { "Snap", 0.55, 0.9 }, H = { "Snap", 3.2, 0.35 }, C = { "Switch", 1.8, 0.7 } }
+
+UI.MusicStyles = {
+    Chill = {
+        bpm = 66, root = 0.9, drumVol = 0.4, melVol = 0.45, padVol = 0.22,
+        drums = { K = "x......." },
+        pad = { [1] = { 0, 7, 12 }, [17] = { 5, 9, 12 }, [33] = { 3, 7, 10 }, [49] = { 5, 10, 14 } }, padLen = 64,
+        mel = { 0, o, o, o, 7, o, o, o, 12, o, o, o, 9, o, 7, o, 4, o, o, o, 7, o, o, o, 0, o, o, o, 5, o, o, o },
+    },
+    Lofi = {
+        bpm = 76, swing = 0.18, root = 0.85, drumVol = 0.55, melVol = 0.4, padVol = 0.2,
+        drums = { K = "x.....x...x.....", S = "....x.......x...", H = "x.x.x.x.x.x.x.x." },
+        bass = { 0, o, o, o, o, o, -2, o, 0, o, o, o, -5, o, o, o },
+        pad = { [1] = { 0, 3, 7, 10 }, [17] = { 5, 8, 12, 15 }, [33] = { 3, 7, 10, 14 }, [49] = { -2, 2, 5, 9 } }, padLen = 64,
+        mel = { 12, o, o, 10, o, o, 7, o, o, o, 5, o, 7, o, o, o, 3, o, o, o, 5, o, o, 7, o, o, 10, o, o, o, o, o },
+    },
+    BoomBap = {
+        bpm = 90, swing = 0.12, root = 0.8, melVol = 0.4,
+        drums = { K = "x..x......x.x...", S = "....x.......x...", H = "x.x.x.x.x.x.x.xx" },
+        bass = { 0, o, o, 0, o, o, o, o, -2, o, o, o, 0, o, o, o },
+        mel = { 7, o, o, o, o, o, 5, o, o, o, 3, o, o, o, o, o },
+    },
+    Trap = {
+        bpm = 140, root = 0.8, melVol = 0.4,
+        drums = { K = "x.....x...x.....", S = "........x.......", C = "........x.......", H = "xoxoxoxoxoxoxxxo" },
+        bass = { 0, o, o, o, o, o, 0, o, o, o, -4, o, o, o, o, o },
+        mel = { 12, o, 15, o, 19, o, o, o, 17, o, 15, o, o, o, o, o },
+    },
+    Hype = {
+        bpm = 150, root = 0.9, melVol = 0.5,
+        drums = { K = "x..x..x...x.x...", S = "....x.......x...", C = "....x.......x..x", H = "xxxoxxxoxxxoxxxx" },
+        bass = { 0, o, 0, o, o, o, 5, o, 0, o, 0, o, 7, o, o, o },
+        mel = { 12, o, o, 12, o, o, 15, o, o, o, 17, o, o, o, o, o, 12, o, o, 12, o, o, 19, o, o, o, 17, o, 15, o, o, o },
+    },
+    Synthwave = {
+        bpm = 104, root = 1.0, melVol = 0.38, drumVol = 0.8,
+        drums = { K = "x...x...x...x...", S = "....x.......x...", H = ".x.x.x.x.x.x.x.x" },
+        bass = { 0, 0, o, 0, 0, o, 0, o, -2, -2, o, -2, -2, o, -2, o },
+        mel = { 0, 4, 7, 12, 7, 4, 0, 4, -2, 2, 5, 10, 5, 2, -2, 2 },
+    },
+    Ambient = {
+        bpm = 48, root = 0.8, melVol = 0.3, padVol = 0.28,
+        pad = { [1] = { 0, 7, 12 }, [33] = { -2, 5, 10 } }, padLen = 64,
+        mel = { 19, o, o, o, o, o, o, o, o, o, o, o, 24, o, o, o, o, o, o, o, 22, o, o, o, o, o, o, o, o, o, o, o },
+    },
+}
+
+local Music = { Style = nil, Name = nil, Step = 0, Next = 0, Playing = false, Sound = nil, avg = 0, lastBeat = 0 }
+UI.Music = Music
+
+local function voice(base, vol, pitch)
+    if not UI.MusicEnabled then return end
+    local id = UI.Sounds[base]
+    if not id then return end
+    pcall(function()
+        local s = Instance.new("Sound")
+        s.SoundId = id
+        s.Volume = math.clamp(vol * UI.MusicVolume * UI.SoundGain, 0, 10)
+        s.PlaybackSpeed = math.clamp(pitch, 0.1, 4)
+        s.Parent = SoundService
+        s.Ended:Connect(function() s:Destroy() end)
+        s:Play()
+        Debris:AddItem(s, 6)
+    end)
+end
+
+local function kick()
+    UI._beat = 1
+    UI._beatId += 1
+end
+
+local function playStep(st, i)
+    local dv = st.drumVol or 1
+    if st.drums then
+        for key, pat in pairs(st.drums) do
+            local idx = ((i - 1) % #pat) + 1
+            local ch = string.sub(pat, idx, idx)
+            if ch ~= "." then
+                local ins = INS[key]
+                voice(ins[1], ins[3] * dv * (ch == "o" and 0.5 or 1), ins[2] * (0.97 + math.random() * 0.06))
+                if key == "K" then kick() end
+            end
+        end
+    end
+    if not (st.drums and st.drums.K) and (i - 1) % 4 == 0 then kick() end
+    if st.bass then
+        local n = st.bass[((i - 1) % #st.bass) + 1]
+        if n then voice("Bass", 0.85, 0.5 * 2 ^ (n / 12)) end
+    end
+    if st.mel then
+        local n = st.mel[((i - 1) % #st.mel) + 1]
+        if n then voice("Ping", st.melVol or 0.5, (st.root or 1) * 2 ^ (n / 12)) end
+    end
+    if st.pad then
+        local c = st.pad[((i - 1) % (st.padLen or 64)) + 1]
+        if c then
+            for _, n in ipairs(c) do voice("Ping", st.padVol or 0.25, (st.root or 1) * 0.5 * 2 ^ (n / 12)) end
+        end
+    end
+end
+
+RunService.Heartbeat:Connect(function(dt)
+    UI._beat = math.max(0, UI._beat - dt * 4)
+    local now = os.clock()
+    if Music.Playing and Music.Style then
+        local st = Music.Style
+        local stepDur = 60 / st.bpm / 4
+        local guard = 0
+        while now >= Music.Next and guard < 4 do
+            local idx = Music.Step + 1
+            if st.swing and Music.Step % 2 == 1 then
+                task.delay(st.swing * stepDur, function() if Music.Style == st then playStep(st, idx) end end)
+            else
+                playStep(st, idx)
+            end
+            Music.Step += 1
+            Music.Next += stepDur
+            guard += 1
+        end
+        if guard == 4 then Music.Next = now + stepDur end
+    elseif Music.Playing and Music.Sound then
+        local ld = Music.Sound.PlaybackLoudness
+        Music.avg = Music.avg * 0.95 + ld * 0.05
+        if ld > Music.avg * 1.4 and ld > 80 and now - Music.lastBeat > 0.22 then
+            Music.lastBeat = now
+            kick()
+        end
+    else
+        UI._metro += dt
+        if UI._metro > 0.5 then UI._metro = 0; kick() end
+    end
+end)
+
+function UI:StopMusic()
+    Music.Style, Music.Name, Music.Playing = nil, nil, false
+    if Music.Sound then Music.Sound:Destroy(); Music.Sound = nil end
+    if UI._onMusic then UI._onMusic(nil) end
+end
+
+function UI:PlayMusic(name)
+    UI:StopMusic()
+    if not name or name == "Off" or name == "Auto" or not UI.MusicEnabled then return end
+    local custom = UI.Tracks[name]
+    if custom then
+        pcall(function()
+            local s = Instance.new("Sound")
+            s.SoundId = custom
+            s.Looped = true
+            s.Volume = math.clamp(UI.MusicVolume * 1.5, 0, 10)
+            s.Parent = SoundService
+            s:Play()
+            Music.Sound = s
+        end)
+        Music.Name, Music.Playing = name, Music.Sound ~= nil
+    elseif UI.MusicStyles[name] then
+        Music.Style, Music.Name, Music.Step, Music.Next, Music.Playing = UI.MusicStyles[name], name, 0, os.clock() + 0.1, true
+    end
+    if UI._onMusic then UI._onMusic(Music.Name) end
+end
+
+function UI:SetMusicVolume(v)
+    UI.MusicVolume = v
+    if Music.Sound then Music.Sound.Volume = math.clamp(v * 1.5, 0, 10) end
+end
+
+function UI:GetMusicNames()
+    local names, styles, custom = { "Auto", "Off" }, {}, {}
+    for k in pairs(UI.MusicStyles) do table.insert(styles, k) end
+    for k in pairs(UI.Tracks) do table.insert(custom, k) end
+    table.sort(styles); table.sort(custom)
+    for _, k in ipairs(styles) do table.insert(names, k) end
+    for _, k in ipairs(custom) do table.insert(names, k) end
+    return names
+end
+
+function UI:ApplyMusicChoice(themeName)
+    if not UI.MusicEnabled then UI:StopMusic() return end
+    local c = UI.MusicChoice
+    local target
+    if c == "Auto" then target = UI.AutoMusic and UI.ThemeMusic[themeName] or nil
+    elseif c ~= "Off" then target = c end
+    if target == Music.Name and Music.Playing then return end
+    if target then UI:PlayMusic(target) else UI:StopMusic() end
+end
 
 pcall(function()
     local VirtualUser = game:GetService("VirtualUser")
@@ -244,11 +488,72 @@ UI.Themes = {
         Accent = rgb(37, 99, 235), Accent2 = rgb(14, 165, 233),
         Text = rgb(15, 23, 42), Muted = rgb(100, 116, 139), Border = rgb(203, 213, 225), Fx = "Bubbles",
     }),
+    Synthwave = mk({
+        Background = rgb(20, 8, 36), Sidebar = rgb(26, 10, 46), Section = rgb(33, 13, 58),
+        Element = rgb(43, 17, 74), ElementHover = rgb(58, 23, 98),
+        Accent = rgb(255, 56, 206), Accent2 = rgb(56, 189, 248),
+        Text = rgb(252, 236, 255), Muted = rgb(172, 128, 196), Border = rgb(84, 32, 120),
+    }),
+    Lava = mk({
+        Background = rgb(18, 6, 4), Sidebar = rgb(25, 8, 5), Section = rgb(33, 11, 7),
+        Element = rgb(44, 15, 9), ElementHover = rgb(58, 20, 12),
+        Accent = rgb(255, 69, 0), Accent2 = rgb(255, 170, 0),
+        Text = rgb(255, 238, 226), Muted = rgb(176, 124, 104), Border = rgb(84, 30, 16),
+    }),
+    Arctic = mk({
+        Background = rgb(8, 16, 22), Sidebar = rgb(10, 21, 29), Section = rgb(14, 28, 39),
+        Element = rgb(19, 38, 52), ElementHover = rgb(25, 50, 68),
+        Accent = rgb(180, 240, 255), Accent2 = rgb(120, 190, 255), AccentText = rgb(6, 24, 34),
+        Text = rgb(232, 248, 255), Muted = rgb(116, 150, 168), Border = rgb(32, 62, 82),
+    }),
+    Candy = mk({
+        Background = rgb(26, 12, 28), Sidebar = rgb(33, 15, 36), Section = rgb(42, 19, 46),
+        Element = rgb(54, 24, 59), ElementHover = rgb(70, 31, 76),
+        Accent = rgb(255, 120, 200), Accent2 = rgb(120, 220, 255), AccentText = rgb(48, 8, 36),
+        Text = rgb(255, 240, 250), Muted = rgb(184, 130, 170), Border = rgb(92, 44, 98),
+    }),
+    Terminal = mk({
+        Background = rgb(8, 6, 2), Sidebar = rgb(12, 9, 3), Section = rgb(17, 13, 4),
+        Element = rgb(24, 18, 6), ElementHover = rgb(33, 25, 8),
+        Accent = rgb(255, 176, 0), Accent2 = rgb(255, 120, 0), AccentText = rgb(24, 14, 0),
+        Text = rgb(255, 232, 186), Muted = rgb(160, 122, 60), Border = rgb(66, 48, 14),
+    }),
+    Royal = mk({
+        Background = rgb(14, 10, 26), Sidebar = rgb(19, 13, 35), Section = rgb(25, 18, 46),
+        Element = rgb(33, 24, 60), ElementHover = rgb(44, 32, 80),
+        Accent = rgb(212, 175, 55), Accent2 = rgb(147, 112, 219), AccentText = rgb(26, 18, 2),
+        Text = rgb(246, 240, 226), Muted = rgb(152, 140, 176), Border = rgb(58, 44, 96),
+    }),
+    Bloodmoon = mk({
+        Background = rgb(14, 4, 6), Sidebar = rgb(19, 5, 8), Section = rgb(26, 7, 11),
+        Element = rgb(35, 10, 15), ElementHover = rgb(47, 13, 20),
+        Accent = rgb(190, 18, 60), Accent2 = rgb(255, 90, 90),
+        Text = rgb(250, 232, 234), Muted = rgb(160, 110, 116), Border = rgb(72, 20, 30),
+    }),
+    Tokyo = mk({
+        Background = rgb(10, 10, 24), Sidebar = rgb(13, 13, 32), Section = rgb(18, 18, 42),
+        Element = rgb(25, 25, 56), ElementHover = rgb(34, 34, 76),
+        Accent = rgb(0, 255, 200), Accent2 = rgb(255, 0, 128), AccentText = rgb(0, 28, 22),
+        Text = rgb(238, 242, 255), Muted = rgb(128, 134, 176), Border = rgb(40, 40, 96),
+    }),
+    Riot = mk({
+        Background = rgb(10, 8, 16), Sidebar = rgb(14, 11, 22), Section = rgb(19, 15, 30),
+        Element = rgb(27, 21, 42), ElementHover = rgb(38, 30, 60),
+        Accent = rgb(255, 59, 48), Accent2 = rgb(255, 204, 0), AccentText = rgb(30, 4, 2),
+        Text = rgb(252, 240, 238), Muted = rgb(168, 140, 144), Border = rgb(72, 40, 52),
+    }),
+    Deepsea = mk({
+        Background = rgb(2, 10, 20), Sidebar = rgb(3, 14, 27), Section = rgb(5, 19, 36),
+        Element = rgb(8, 26, 48), ElementHover = rgb(11, 35, 64),
+        Accent = rgb(0, 180, 216), Accent2 = rgb(144, 224, 239), AccentText = rgb(0, 20, 30),
+        Text = rgb(226, 246, 252), Muted = rgb(100, 148, 168), Border = rgb(14, 50, 78),
+    }),
 }
 UI.ThemeOrder = {
     "GreyWhite", "Midnight", "Graphite", "Light", "Cloud", "Amethyst", "Emerald", "Rose",
     "Frost", "Sakura", "Inferno", "Ocean", "Matrix", "Nebula", "Aurora", "Cyberpunk", "Forest", "Storm",
     "Sunset", "Gold", "Void", "Toxic", "Crimson",
+    "Synthwave", "Lava", "Arctic", "Candy", "Terminal", "Royal", "Bloodmoon", "Tokyo", "Riot", "Deepsea",
 }
 function UI:GetThemeNames() return table.clone(UI.ThemeOrder) end
 UI.ThemeAliases = { GrayBlack = "Graphite", Grey = "Graphite", Gray = "Graphite", White = "Light", Dark = "Midnight", Purple = "Amethyst" }
@@ -257,10 +562,22 @@ UI.ThemeFx = {
     GreyWhite = "Equalizer", Midnight = "Constellation", Light = "Constellation", Cloud = "Waves",
     Amethyst = "Vortex", Emerald = "Helix", Rose = "Fireworks", Ocean = "Waves", Nebula = "Warp",
     Cyberpunk = "Glitch", Storm = "Lightning", Void = "Vortex", Gold = "Fireworks", Sunset = "Comets",
+    Synthwave = "Tunnel", Lava = "Plasma", Arctic = "Snow", Candy = "Confetti", Terminal = "Radar",
+    Royal = "Meteors", Bloodmoon = "BeatPulse", Tokyo = "RingViz", Riot = "Chaos", Deepsea = "Plasma",
 }
 for themeName, fxName in pairs(UI.ThemeFx) do
     if UI.Themes[themeName] then UI.Themes[themeName].Fx = fxName end
 end
+
+UI.ThemeMusic = {
+    Light = "Chill", Cloud = "Chill", Emerald = "Chill", Forest = "Chill", Amethyst = "Chill",
+    Frost = "Ambient", Arctic = "Ambient", Ocean = "Ambient", Deepsea = "Ambient", Aurora = "Ambient", Void = "Ambient",
+    Sakura = "Lofi", Candy = "Lofi", Midnight = "Lofi", Rose = "Lofi", Royal = "Lofi",
+    Nebula = "Synthwave", Synthwave = "Synthwave", Sunset = "Synthwave",
+    GreyWhite = "BoomBap", Graphite = "BoomBap", Terminal = "BoomBap",
+    Matrix = "Trap", Lava = "Trap", Bloodmoon = "Trap", Inferno = "Trap", Crimson = "Trap", Storm = "Trap", Toxic = "Trap",
+    Cyberpunk = "Hype", Tokyo = "Hype", Gold = "Hype", Riot = "Hype",
+}
 
 local function resolveTheme(name)
     if type(name) == "table" then
@@ -597,15 +914,15 @@ function UI:CreateWindow(options)
     local bindings, hooks, conns = {}, {}, {}
 
     local function make(class, props, parent, themed)
-        local o = new(class, props, nil)
+        local o2 = new(class, props, nil)
         if themed then
             for prop, key in pairs(themed) do
-                o[prop] = theme[key]
-                table.insert(bindings, { o, prop, key })
+                o2[prop] = theme[key]
+                table.insert(bindings, { o2, prop, key })
             end
         end
-        o.Parent = parent
-        return o
+        o2.Parent = parent
+        return o2
     end
     local function onTheme(fn) table.insert(hooks, fn) end
     local function connect(signal, fn)
@@ -1009,14 +1326,14 @@ function UI:CreateWindow(options)
     end
     FX.Orbs = function(tok)
         for _ = 1, 12 do
-            local o = dot(rand(24, 60), rand() < 0.5 and theme.Accent or theme.Accent2)
-            o.Position = UDim2.fromScale(rand(), rand())
-            o.BackgroundTransparency = 0.9
-            o.Parent = fxLayer
+            local o2 = dot(rand(24, 60), rand() < 0.5 and theme.Accent or theme.Accent2)
+            o2.Position = UDim2.fromScale(rand(), rand())
+            o2.BackgroundTransparency = 0.9
+            o2.Parent = fxLayer
             task.spawn(function()
-                while fxToken == tok and o.Parent do
+                while fxToken == tok and o2.Parent do
                     local d = 5 + rand() * 5
-                    tween(o, {
+                    tween(o2, {
                         Position = UDim2.fromScale(rand(), rand()),
                         BackgroundTransparency = 0.82 + rand() * 0.14,
                         Size = UDim2.fromOffset(rand(24, 70), rand(24, 70)),
@@ -1165,9 +1482,9 @@ function UI:CreateWindow(options)
                     local a, b = pts[i], pts[i + 1]
                     local dx, dy = b[1] - a[1], b[2] - a[2]
                     local l = math.sqrt(dx * dx + dy * dy) + 1e-3
-                    local o = (rand() - 0.5) * 2 * off
+                    local o2 = (rand() - 0.5) * 2 * off
                     np[#np + 1] = a
-                    np[#np + 1] = { (a[1] + b[1]) / 2 + (-dy / l) * o, (a[2] + b[2]) / 2 + (dx / l) * o }
+                    np[#np + 1] = { (a[1] + b[1]) / 2 + (-dy / l) * o2, (a[2] + b[2]) / 2 + (dx / l) * o2 }
                 end
                 np[#np + 1] = pts[#pts]
                 pts = np
@@ -1362,16 +1679,16 @@ function UI:CreateWindow(options)
             }, fxLayer)
             bars[i] = { b = b, cap = cap, h = 0, peak = 0 }
         end
-        local t, beat, kick = 0, 0, 0
+        local t, beat, kickAcc = 0, 0, 0
         step(tok, function(dt)
             t += dt
             beat += dt
-            if beat > 0.55 then beat = 0; kick = 1; sfx("Bass", 0.35, 1.1, 0.2) end
-            kick = math.max(0, kick - dt * 3)
+            if beat > 0.55 then beat = 0; kickAcc = 1; sfx("Bass", 0.35, 1.1, 0.2) end
+            kickAcc = math.max(0, kickAcc - dt * 3)
             for i, bar in ipairs(bars) do
                 local nz = math.clamp(math.noise(i * 0.35, t * 1.3, 0.5) * 1.2 + 0.5, 0, 1)
                 local shape = 0.25 + 0.75 * math.sin(i / n * math.pi)
-                local goal = (0.1 + nz * 0.55 * shape + kick * 0.3 * shape) * H * 0.55
+                local goal = (0.1 + nz * 0.55 * shape + kickAcc * 0.3 * shape) * H * 0.55
                 bar.h += (goal - bar.h) * math.min(1, dt * 14)
                 bar.b.Size = UDim2.fromOffset(bw - 3, math.max(3, bar.h))
                 bar.peak = math.max(bar.peak - dt * 40, bar.h)
@@ -1489,6 +1806,257 @@ function UI:CreateWindow(options)
             end
         end)
     end
+    FX.BeatPulse = function(tok)
+        local cx, cy = W / 2, H / 2
+        local glow2 = new("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(200, 200),
+            BackgroundTransparency = 1, Image = SHADOW_IMAGE, ImageColor3 = theme.Accent, ImageTransparency = 0.8,
+            ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450), ZIndex = 1,
+        }, fxLayer)
+        local core = dot(40, theme.Accent)
+        core.Position = UDim2.fromOffset(cx, cy)
+        core.BackgroundTransparency = 0.7
+        core.Parent = fxLayer
+        local flash = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = theme.Accent, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 2 }, fxLayer)
+        local lastId, flip = UI._beatId, false
+        step(tok, function()
+            local b = UI._beat
+            local s = 40 + b * 50
+            core.Size = UDim2.fromOffset(s, s)
+            glow2.Size = UDim2.fromOffset(200 + b * 140, 200 + b * 140)
+            glow2.ImageTransparency = 0.8 - b * 0.35
+            flash.BackgroundTransparency = 1 - b * 0.07
+            if UI._beatId ~= lastId then
+                lastId = UI._beatId
+                flip = not flip
+                local ring = new("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(30, 30),
+                    BackgroundTransparency = 1, ZIndex = 1,
+                }, fxLayer)
+                corner(ring, 999)
+                local st = new("UIStroke", { Color = flip and theme.Accent or theme.Accent2, Thickness = 3, Transparency = 0.2 }, ring)
+                tween(ring, { Size = UDim2.fromOffset(W * 1.1, W * 1.1) }, 0.9, Enum.EasingStyle.Quad)
+                tween(st, { Transparency = 1, Thickness = 0.5 }, 0.9, Enum.EasingStyle.Quad)
+                task.delay(1, function() ring:Destroy() end)
+            end
+        end)
+    end
+    FX.Disco = function(tok)
+        local px = W / 2
+        local cols = { theme.Accent, theme.Accent2, white, theme.Accent:Lerp(theme.Accent2, 0.5), theme.Accent2, theme.Accent }
+        local beams = {}
+        for i = 1, 6 do
+            local f = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = cols[i], BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+            new("UIGradient", { Transparency = NumberSequence.new({ nk(0, 0.55), nk(1, 1) }) }, f)
+            beams[i] = { f = f, ph = i * 1.1, sp = 0.5 + rand() * 0.6, w = 40 + rand() * 30 }
+        end
+        local ball = dot(26, white)
+        ball.Position = UDim2.fromOffset(px, 16)
+        ball.ZIndex = 3
+        ball.Parent = fxLayer
+        spin(new("UIGradient", { Color = ColorSequence.new(white, rgb(110, 110, 140)) }, ball), 3)
+        local strobe = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = white, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 4 }, fxLayer)
+        local t, lastId, count = 0, UI._beatId, 0
+        step(tok, function(dt)
+            t += dt
+            local b = UI._beat
+            for _, bm in ipairs(beams) do
+                local ang = math.pi / 2 + math.sin(t * bm.sp + bm.ph) * 1.05
+                local len = H * 1.5
+                bm.f.Position = UDim2.fromOffset(px + math.cos(ang) * len / 2, 10 + math.sin(ang) * len / 2)
+                bm.f.Size = UDim2.fromOffset(len, bm.w * (1 + b * 0.5))
+                bm.f.Rotation = math.deg(ang)
+                bm.f.BackgroundTransparency = 0.5 - b * 0.4
+            end
+            if UI._beatId ~= lastId then
+                lastId = UI._beatId
+                count += 1
+                burst(fxLayer, px, 16, white, 6, 70, 5)
+                if count % 4 == 1 then
+                    strobe.BackgroundTransparency = 0.85
+                    tween(strobe, { BackgroundTransparency = 1 }, 0.25)
+                end
+            end
+        end)
+    end
+    FX.RingViz = function(tok)
+        local cx, cy = W / 2, H / 2
+        local n, r0 = 56, 64
+        local bars = {}
+        for i = 1, n do
+            bars[i] = new("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = theme.Accent:Lerp(theme.Accent2, math.abs(i / n * 2 - 1)),
+                BorderSizePixel = 0, ZIndex = 1,
+            }, fxLayer)
+        end
+        local ring = dot(r0 * 2, white)
+        ring.Position = UDim2.fromOffset(cx, cy)
+        ring.BackgroundTransparency = 1
+        ring.Parent = fxLayer
+        local ringStroke = new("UIStroke", { Color = theme.Accent, Thickness = 2, Transparency = 0.2 }, ring)
+        local t = 0
+        step(tok, function(dt)
+            t += dt
+            local b = UI._beat
+            for i, bar in ipairs(bars) do
+                local a = (i / n) * math.pi * 2 + t * 0.15
+                local nz = math.clamp(math.noise(i * 0.22, t * 1.1, 1.5) * 1.3 + 0.5, 0, 1)
+                local len = 6 + nz * 34 + b * 28 * (0.4 + nz)
+                local rr = r0 + len / 2 + 4
+                bar.Position = UDim2.fromOffset(cx + math.cos(a) * rr, cy + math.sin(a) * rr)
+                bar.Size = UDim2.fromOffset(len, 3)
+                bar.Rotation = math.deg(a)
+                bar.BackgroundTransparency = 0.15 + (1 - nz) * 0.5
+            end
+            ringStroke.Thickness = 2 + b * 3
+            ring.Size = UDim2.fromOffset(r0 * 2 + b * 10, r0 * 2 + b * 10)
+        end)
+    end
+    FX.Plasma = function(tok)
+        local cols = { theme.Accent, theme.Accent2, theme.Accent:Lerp(theme.Accent2, 0.5), theme.Accent2, theme.Accent, theme.Accent:Lerp(white, 0.3) }
+        local blobs = {}
+        for i = 1, 6 do
+            blobs[i] = {
+                f = new("ImageLabel", {
+                    AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(240, 240), BackgroundTransparency = 1, Image = SHADOW_IMAGE,
+                    ImageColor3 = cols[i], ImageTransparency = 0.72, ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450), ZIndex = 1,
+                }, fxLayer),
+                fx = 0.25 + rand() * 0.5, fy = 0.2 + rand() * 0.5, px = rand() * 6, py = rand() * 6, s = 200 + rand() * 120,
+            }
+        end
+        local t = 0
+        step(tok, function(dt)
+            t += dt
+            local b = UI._beat
+            for i, bl in ipairs(blobs) do
+                bl.f.Position = UDim2.fromOffset(W / 2 + math.sin(t * bl.fx + bl.px) * W * 0.38, H / 2 + math.cos(t * bl.fy + bl.py) * H * 0.34)
+                local sz = bl.s * (1 + b * 0.25 + 0.1 * math.sin(t + i))
+                bl.f.Size = UDim2.fromOffset(sz, sz)
+                bl.f.ImageTransparency = 0.72 - b * 0.1
+            end
+        end)
+    end
+    FX.Tunnel = function(tok)
+        local n = 14
+        local rects = {}
+        for i = 1, n do
+            local f = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(W / 2, H / 2), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+            rects[i] = { f = f, st = new("UIStroke", { Thickness = 1, Color = theme.Accent, Transparency = 1 }, f), z = i / n }
+        end
+        local t = 0
+        step(tok, function(dt)
+            t += dt
+            local b = UI._beat
+            for _, r in ipairs(rects) do
+                r.z += dt * (0.22 + b * 0.5)
+                if r.z > 1 then r.z -= 1 end
+                local z = r.z
+                local s = (0.03 + z * z * 1.7) * W
+                r.f.Size = UDim2.fromOffset(s, s * 0.62)
+                r.f.Rotation = math.sin(t * 0.4) * 12 + z * 25
+                r.st.Color = theme.Accent:Lerp(theme.Accent2, z)
+                r.st.Thickness = 1 + z * 2.5
+                r.st.Transparency = math.clamp(1 - math.sin(z * math.pi) * 1.1, 0.05, 1)
+            end
+        end)
+    end
+    FX.Meteors = function(tok)
+        local ms = {}
+        local function spawnMeteor()
+            if #ms > 8 then return end
+            local x, y = W * (0.2 + rand() * 0.9), -10
+            local ang = math.rad(115 + rand() * 12)
+            local sp = 300 + rand() * 220
+            local head = dot(rand(4, 6), white)
+            head.Position = UDim2.fromOffset(x, y)
+            head.ZIndex = 2
+            head.Parent = fxLayer
+            local trail = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = theme.Accent2, BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+            new("UIGradient", { Transparency = NumberSequence.new({ nk(0, 1), nk(1, 0) }) }, trail)
+            ms[#ms + 1] = { head = head, trail = trail, x = x, y = y, ang = ang, vx = math.cos(ang) * sp, vy = math.sin(ang) * sp, len = 80 + rand() * 70, ground = H * (0.55 + rand() * 0.4) }
+            sfx("Switch", 0.25, 2.8 + rand())
+        end
+        task.spawn(function()
+            while fxToken == tok and fxLayer.Parent do
+                task.wait(0.7 + rand() * 1.6)
+                if fxToken ~= tok then break end
+                if Window.Visible then spawnMeteor() end
+            end
+        end)
+        step(tok, function(dt)
+            for i = #ms, 1, -1 do
+                local m = ms[i]
+                m.x += m.vx * dt
+                m.y += m.vy * dt
+                m.head.Position = UDim2.fromOffset(m.x, m.y)
+                m.trail.Position = UDim2.fromOffset(m.x - math.cos(m.ang) * m.len / 2, m.y - math.sin(m.ang) * m.len / 2)
+                m.trail.Size = UDim2.fromOffset(m.len, 3)
+                m.trail.Rotation = math.deg(m.ang)
+                if m.y >= m.ground or m.x < -20 then
+                    if m.x > 0 then
+                        burst(fxLayer, m.x, m.y, theme.Accent, 10, 40, 3)
+                        sfx("Snap", 0.6, 0.5)
+                        sfx("Bass", 0.7, 0.7)
+                    end
+                    m.head:Destroy()
+                    m.trail:Destroy()
+                    table.remove(ms, i)
+                end
+            end
+        end)
+    end
+    FX.Radar = function(tok)
+        local cx, cy = W / 2, H / 2
+        local R = math.min(W, H) * 0.46
+        for k = 1, 4 do
+            local rr = R * k / 4
+            local f = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(rr * 2, rr * 2), BackgroundTransparency = 1, ZIndex = 1 }, fxLayer)
+            corner(f, 999)
+            new("UIStroke", { Color = theme.Accent, Thickness = 1, Transparency = 0.8 }, f)
+        end
+        new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(R * 2, 1), BackgroundColor3 = theme.Accent, BackgroundTransparency = 0.85, BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+        new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(1, R * 2), BackgroundColor3 = theme.Accent, BackgroundTransparency = 0.85, BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+        local lines = {}
+        for i = 1, 14 do
+            lines[i] = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = theme.Accent, BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+        end
+        local blips = {}
+        for i = 1, 9 do
+            local f = dot(5, theme.Accent2)
+            local a, r = rand() * math.pi * 2, R * (0.2 + rand() * 0.75)
+            f.Position = UDim2.fromOffset(cx + math.cos(a) * r, cy + math.sin(a) * r)
+            f.BackgroundTransparency = 1
+            f.Parent = fxLayer
+            blips[i] = { f = f, a = a, glow = 0 }
+        end
+        local ang = 0
+        step(tok, function(dt)
+            ang += dt * 1.5
+            for i, l in ipairs(lines) do
+                local a = ang - (i - 1) * 0.06
+                setLine(l, cx, cy, cx + math.cos(a) * R, cy + math.sin(a) * R, i == 1 and 2 or 1)
+                l.BackgroundTransparency = 0.15 + (i - 1) * 0.065
+            end
+            for _, bl in ipairs(blips) do
+                local d = (ang - bl.a) % (math.pi * 2)
+                if d < 0.12 and bl.glow < 0.3 then
+                    bl.glow = 1
+                    sfx("Ping", 0.3, 1.8 + bl.a * 0.1, 0.08)
+                end
+                bl.glow = math.max(0, bl.glow - dt * 0.5)
+                bl.f.BackgroundTransparency = 1 - bl.glow * 0.95
+                local s = 3 + bl.glow * 6
+                bl.f.Size = UDim2.fromOffset(s, s)
+            end
+        end)
+    end
+    FX.Chaos = function(tok)
+        FX.Plasma(tok)
+        FX.Disco(tok)
+        FX.BeatPulse(tok)
+        FX.Confetti(tok)
+        FX.Fireworks(tok)
+    end
 
     Window.Fx = "Matrix"
     Window.FxOverride = options.Fx
@@ -1505,7 +2073,7 @@ function UI:CreateWindow(options)
             task.spawn(function()
                 task.wait(0.5 + rand())
                 while fxToken == tok and fxLayer.Parent do
-                    fxPing()
+                    if not UI.Music.Playing then fxPing() end
                     task.wait(prof[4] * (0.7 + rand() * 0.6))
                 end
             end)
@@ -1611,6 +2179,7 @@ function UI:CreateWindow(options)
         }, header, { TextColor3 = "Muted", BackgroundColor3 = hoverKey })
         corner(b, 6)
         b.MouseEnter:Connect(function()
+            sfx("Snap", 0.06, 2.8, 0.06)
             tween(b, { BackgroundTransparency = 0, TextColor3 = hoverKey == "Danger" and Color3.new(1, 1, 1) or theme.Text }, 0.15)
         end)
         b.MouseLeave:Connect(function()
@@ -1643,6 +2212,7 @@ function UI:CreateWindow(options)
     local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
     header.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            sfx("Snap", 0.2, 1.2)
             dragging, dragInput, dragStart, startPos = true, input, input.Position, root.Position
         end
     end)
@@ -1670,7 +2240,7 @@ function UI:CreateWindow(options)
     corner(searchBox, 7)
     new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, searchBox)
     local searchStroke = strokeT(searchBox, "Border", 1, 0.2)
-    searchBox.Focused:Connect(function() tween(searchStroke, { Color = theme.Accent, Transparency = 0 }, 0.2) end)
+    searchBox.Focused:Connect(function() sfx("Ping", 0.25, 1.9) tween(searchStroke, { Color = theme.Accent, Transparency = 0 }, 0.2) end)
     searchBox.FocusLost:Connect(function() tween(searchStroke, { Color = theme.Border, Transparency = 0.2 }, 0.2) end)
 
     local showProfile = options.ShowProfile ~= false
@@ -1751,6 +2321,7 @@ function UI:CreateWindow(options)
         task.delay(0.12, function() sfx("Ping", 0.5, 1.35) end)
         playSweep()
         burst(main, main.AbsoluteSize.X / uiScale.Scale / 2, main.AbsoluteSize.Y / uiScale.Scale / 2, theme.Accent, 16, 90, 60)
+        UI:ApplyMusicChoice(Window.ThemeName)
         return true
     end
     function Window:SetCustomTheme(custom)
@@ -1923,10 +2494,11 @@ function UI:CreateWindow(options)
         if typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode then Window.Keybind = k end
     end
 
-    closeBtn.Activated:Connect(function() Window:SetVisible(false) end)
+    closeBtn.Activated:Connect(function() sfx("Switch", 0.4, 0.7) Window:SetVisible(false) end)
 
     local minimized = false
     minimizeBtn.Activated:Connect(function()
+        sfx("Switch", 0.4, minimized and 1.4 or 0.9)
         minimized = not minimized
         closeDropdown()
         tween(root, { Size = minimized and UDim2.new(baseSize.X.Scale, baseSize.X.Offset, 0, HEADER_H) or baseSize }, 0.4, Enum.EasingStyle.Back)
@@ -2010,6 +2582,7 @@ function UI:CreateWindow(options)
     end
 
     function Window:Shake()
+        sfx("Bass", 0.6, 0.6)
         local origin = root.Position
         task.spawn(function()
             for i = 1, 6 do
@@ -2094,7 +2667,7 @@ function UI:CreateWindow(options)
             if img then tween(img, { ImageColor3 = active and theme.Accent or theme.Muted }, 0.2) end
         end
         onTheme(Tab.Paint)
-        btn.MouseEnter:Connect(function() hovering = true Tab.Paint() end)
+        btn.MouseEnter:Connect(function() sfx("Snap", 0.06, 2.6, 0.06) hovering = true Tab.Paint() end)
         btn.MouseLeave:Connect(function() hovering = false Tab.Paint() end)
 
         local page = make("ScrollingFrame", {
@@ -2177,6 +2750,7 @@ function UI:CreateWindow(options)
                 corner(edge, 999)
                 table.insert(Section.Rows, { Frame = r, Text = text or "", Anim = true })
                 r.MouseEnter:Connect(function()
+                    sfx("Snap", 0.08, 2.4, 0.06)
                     tween(r, { BackgroundColor3 = theme.ElementHover }, 0.15)
                     tween(st, { Color = theme.Accent, Transparency = 0.6 }, 0.2)
                     tween(edge, { Size = UDim2.fromOffset(3, math.floor(height * 0.55)) }, 0.25, Enum.EasingStyle.Back)
@@ -2268,15 +2842,15 @@ function UI:CreateWindow(options)
                 cfg = cfg or {}
                 local min = cfg.Range and cfg.Range[1] or 0
                 local max = cfg.Range and cfg.Range[2] or 100
-                local step = cfg.Increment or 1
+                local step2 = cfg.Increment or 1
                 assert(max > min, "Invalid slider range")
                 local suffix = cfg.Suffix or ""
                 local id = cfg.ConfigKey or cfg.Flag
                 local decimals = 0
-                local frac = string.match(tostring(step), "%.(%d+)")
+                local frac = string.match(tostring(step2), "%.(%d+)")
                 if frac then decimals = #frac end
                 local function snap(v)
-                    v = math.clamp(min + math.floor((v - min) / step + 0.5) * step, min, max)
+                    v = math.clamp(min + math.floor((v - min) / step2 + 0.5) * step2, min, max)
                     return tonumber(string.format("%." .. decimals .. "f", v))
                 end
                 local value = snap(cfg.CurrentValue or min)
@@ -2476,6 +3050,7 @@ function UI:CreateWindow(options)
                 new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, box)
                 local st = strokeT(box, "Border", 1, 0.3)
                 box.Focused:Connect(function()
+                    sfx("Ping", 0.25, 1.7)
                     tween(st, { Color = theme.Accent, Transparency = 0, Thickness = 1.5 }, 0.2)
                     tween(box, { Size = UDim2.fromOffset(168, 26) }, 0.25, Enum.EasingStyle.Back)
                 end)
@@ -2526,6 +3101,7 @@ function UI:CreateWindow(options)
                     if listening then stopListening() return end
                     listening = true
                     listenLoop += 1
+                    sfx("Switch", 0.3, 1.6)
                     local tok = listenLoop
                     b.Text = "Press a key"
                     tween(st, { Color = theme.Accent, Transparency = 0 }, 0.2)
@@ -2626,7 +3202,7 @@ function UI:CreateWindow(options)
     })
     appearanceSec:CreateDropdown({
         Name = "Background Effect",
-        Options = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "Orbs", "Confetti", "Comets", "Ripples", "Warp", "Vortex", "Lightning", "Constellation", "Fireworks", "Equalizer", "Waves", "Glitch", "Helix", "None" },
+        Options = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "Orbs", "Confetti", "Comets", "Ripples", "Warp", "Vortex", "Lightning", "Constellation", "Fireworks", "Equalizer", "Waves", "Glitch", "Helix", "Tunnel", "Radar", "Plasma", "Meteors", "RingViz", "BeatPulse", "Disco", "Chaos", "None" },
         CurrentOption = Window.FxOverride or "Theme Default",
         Callback = function(v) Window:SetFx(v) end,
     })
@@ -2673,10 +3249,50 @@ function UI:CreateWindow(options)
     local soundSec = settingsTab:CreateSection("Sound")
     soundSec:CreateToggle({ Name = "Sound Effects", CurrentValue = UI.SoundEnabled, Callback = function(v) UI.SoundEnabled = v end })
     soundSec:CreateSlider({
-        Name = "Volume", Range = { 0, 100 }, Increment = 5, Suffix = "%", CurrentValue = UI.SoundVolume * 100,
+        Name = "Effects Volume", Range = { 0, 100 }, Increment = 5, Suffix = "%", CurrentValue = UI.SoundVolume * 100,
         Callback = function(v) UI.SoundVolume = v / 100 end,
     })
+    soundSec:CreateDropdown({
+        Name = "Sound Pack", Options = { "Soft", "Crisp", "Retro", "Deep" }, CurrentOption = UI.SoundPack,
+        Callback = function(v) UI.SoundPack = v; sfx("Ping", 0.6, 1.2) end,
+    })
     soundSec:CreateButton({ Name = "Preview Effect Sound", Callback = function() fxPing() end })
+    soundSec:CreateButton({
+        Name = "Run Sound Test",
+        Callback = function()
+            task.spawn(function()
+                local report, ok = UI:TestSounds()
+                Window:Notify({ Title = ok and "All sounds loaded" or "Some sounds failed to load", Content = report, Type = ok and "Success" or "Error", Duration = 9 })
+            end)
+        end,
+    })
+
+    local musicSec = settingsTab:CreateSection("Music")
+    local nowLbl = musicSec:CreateLabel("Now playing: none")
+    UI._onMusic = function(name) nowLbl:SetText("Now playing: " .. tostring(name or "none")) end
+    musicSec:CreateToggle({
+        Name = "Music", CurrentValue = UI.MusicEnabled,
+        Callback = function(v) UI.MusicEnabled = v; UI:ApplyMusicChoice(Window.ThemeName) end,
+    })
+    local musicNames = UI:GetMusicNames()
+    local musicDD = musicSec:CreateDropdown({
+        Name = "Track", Options = musicNames, CurrentOption = UI.MusicChoice,
+        Callback = function(v) UI.MusicChoice = v; UI:ApplyMusicChoice(Window.ThemeName) end,
+    })
+    musicSec:CreateSlider({
+        Name = "Music Volume", Range = { 0, 100 }, Increment = 5, Suffix = "%", CurrentValue = UI.MusicVolume * 100,
+        Callback = function(v) UI:SetMusicVolume(v / 100) end,
+    })
+    musicSec:CreateButton({
+        Name = "Next Track",
+        Callback = function()
+            local cur = table.find(musicNames, UI.Music.Name or "") or 2
+            local nxt = cur + 1
+            if nxt > #musicNames then nxt = 3 end
+            if nxt < 3 then nxt = 3 end
+            musicDD.SetValue(musicNames[nxt])
+        end,
+    })
 
     local consoleSec = settingsTab:CreateSection("Developer Console")
     local consoleFrame = new("ScrollingFrame", {
@@ -2727,6 +3343,10 @@ function UI:CreateWindow(options)
     tween(main, { GroupTransparency = 0 }, 0.3)
     tween(shadow, { ImageTransparency = 0.5 }, 0.4)
     task.delay(0.35, playSweep)
+
+    for i, p in ipairs({ 1, 1.26, 1.5, 2 }) do
+        task.delay(0.12 * i, function() sfx("Ping", 0.5, p, 0.01) end)
+    end
 
     return Window
 end
