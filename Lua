@@ -1,6 +1,9 @@
 --[[
-    IncrementalUi v5.1.0 — Library File
-    Paste this entire file into GitHub.
+    IncrementalUi v5.2.0 — Library File
+    - Fixed glyphs (no more boxes)
+    - New themes: Sunset, Gold, Void, Toxic, Crimson, Cloud
+    - New effects: Orbs, Confetti, Comets, Ripples
+    - Cursor trail + theme flash + row cascade + slider glow
 ]]
 
 local UI = {}
@@ -16,14 +19,13 @@ local GuiService = game:GetService("GuiService")
 local LogService = game:GetService("LogService")
 local Player = Players.LocalPlayer
 
-UI.Version = "5.1.0"
+UI.Version = "5.2.0"
 UI.Windows = {}
 UI.AntiAfk = false
 UI.AutoSave = false
 
 local rgb = Color3.fromRGB
 
--- Anti-AFK Hook
 pcall(function()
     local VirtualUser = game:GetService("VirtualUser")
     Player.Idled:Connect(function()
@@ -34,7 +36,6 @@ pcall(function()
     end)
 end)
 
---==== THEMES ====--
 local function mk(t)
     t.Success = t.Success or rgb(52, 211, 120)
     t.Warning = t.Warning or rgb(245, 176, 65)
@@ -148,10 +149,47 @@ UI.Themes = {
         Accent = rgb(147, 177, 255), Accent2 = rgb(220, 230, 255), AccentText = rgb(12, 18, 36),
         Text = rgb(232, 237, 248), Muted = rgb(123, 134, 158), Border = rgb(46, 56, 78), Fx = "Rain",
     }),
+    Sunset = mk({
+        Background = rgb(20, 11, 16), Sidebar = rgb(26, 14, 20), Section = rgb(33, 18, 24),
+        Element = rgb(42, 23, 30), ElementHover = rgb(54, 30, 39),
+        Accent = rgb(255, 115, 90), Accent2 = rgb(255, 200, 90),
+        Text = rgb(252, 238, 236), Muted = rgb(170, 132, 130), Border = rgb(70, 40, 45), Fx = "Comets",
+    }),
+    Gold = mk({
+        Background = rgb(14, 12, 8), Sidebar = rgb(19, 16, 10), Section = rgb(25, 21, 13),
+        Element = rgb(33, 28, 17), ElementHover = rgb(44, 37, 22),
+        Accent = rgb(250, 204, 21), Accent2 = rgb(251, 146, 60), AccentText = rgb(30, 22, 2),
+        Text = rgb(250, 244, 225), Muted = rgb(160, 148, 115), Border = rgb(62, 52, 28), Fx = "Confetti",
+    }),
+    Void = mk({
+        Background = rgb(5, 5, 8), Sidebar = rgb(8, 8, 12), Section = rgb(11, 11, 16),
+        Element = rgb(16, 16, 23), ElementHover = rgb(23, 23, 33),
+        Accent = rgb(170, 170, 255), Accent2 = rgb(90, 90, 160), AccentText = rgb(8, 8, 20),
+        Text = rgb(225, 225, 240), Muted = rgb(110, 110, 135), Border = rgb(30, 30, 44), Fx = "Orbs",
+    }),
+    Toxic = mk({
+        Background = rgb(10, 13, 6), Sidebar = rgb(13, 18, 8), Section = rgb(17, 24, 10),
+        Element = rgb(23, 32, 13), ElementHover = rgb(31, 43, 17),
+        Accent = rgb(163, 230, 53), Accent2 = rgb(34, 211, 238), AccentText = rgb(14, 24, 2),
+        Text = rgb(238, 250, 222), Muted = rgb(124, 148, 98), Border = rgb(40, 58, 22), Fx = "Ripples",
+    }),
+    Crimson = mk({
+        Background = rgb(16, 8, 9), Sidebar = rgb(21, 10, 12), Section = rgb(28, 13, 16),
+        Element = rgb(37, 17, 21), ElementHover = rgb(49, 22, 28),
+        Accent = rgb(220, 38, 38), Accent2 = rgb(251, 113, 133),
+        Text = rgb(250, 236, 237), Muted = rgb(165, 125, 128), Border = rgb(66, 30, 35), Fx = "Embers",
+    }),
+    Cloud = mk({
+        Background = rgb(238, 244, 252), Sidebar = rgb(228, 236, 248), Section = rgb(255, 255, 255),
+        Element = rgb(255, 255, 255), ElementHover = rgb(240, 246, 255),
+        Accent = rgb(37, 99, 235), Accent2 = rgb(14, 165, 233),
+        Text = rgb(15, 23, 42), Muted = rgb(100, 116, 139), Border = rgb(203, 213, 225), Fx = "Bubbles",
+    }),
 }
 UI.ThemeOrder = {
-    "GreyWhite", "Midnight", "Graphite", "Light", "Amethyst", "Emerald", "Rose",
+    "GreyWhite", "Midnight", "Graphite", "Light", "Cloud", "Amethyst", "Emerald", "Rose",
     "Frost", "Sakura", "Inferno", "Ocean", "Matrix", "Nebula", "Aurora", "Cyberpunk", "Forest", "Storm",
+    "Sunset", "Gold", "Void", "Toxic", "Crimson",
 }
 function UI:GetThemeNames() return table.clone(UI.ThemeOrder) end
 UI.ThemeAliases = { GrayBlack = "Graphite", Grey = "Graphite", Gray = "Graphite", White = "Light", Dark = "Midnight", Purple = "Amethyst" }
@@ -170,32 +208,20 @@ local function resolveTheme(name)
     return table.clone(UI.Themes[n] or UI.Themes.Graphite)
 end
 
---==== UTILITIES ====--
 local function new(class, props, parent)
     local o = Instance.new(class)
     for k, v in pairs(props or {}) do o[k] = v end
     o.Parent = parent
     return o
 end
-
-local function corner(o, r)
-    return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, o)
-end
-
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, o) end
 local function tween(o, props, dur, style, dir)
     local t = TweenService:Create(o, TweenInfo.new(dur or 0.2, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props)
     t:Play()
     return t
 end
-
-local function playerGui()
-    return Player:WaitForChild("PlayerGui")
-end
-
-local function initialOf(name)
-    return string.upper(string.sub(name or "I", 1, 1))
-end
-
+local function playerGui() return Player:WaitForChild("PlayerGui") end
+local function initialOf(name) return string.upper(string.sub(name or "I", 1, 1)) end
 local function loadAvatar(imageLabel)
     task.spawn(function()
         local ok, img = pcall(function()
@@ -204,10 +230,7 @@ local function loadAvatar(imageLabel)
         if ok and img and imageLabel.Parent then imageLabel.Image = img end
     end)
 end
-
-local function accentSeq(t)
-    return ColorSequence.new(t.Accent, t.Accent2)
-end
+local function accentSeq(t) return ColorSequence.new(t.Accent, t.Accent2) end
 local function borderSeq(t)
     return ColorSequence.new({
         ColorSequenceKeypoint.new(0, t.Accent),
@@ -232,7 +255,6 @@ local function makeShadow(parent, grow, transparency)
         ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450), ZIndex = 0,
     }, parent)
 end
-
 local function burst(parent, x, y, color, count, dist, z)
     count = count or 8
     dist = dist or 28
@@ -252,7 +274,6 @@ local function burst(parent, x, y, color, count, dist, z)
         task.delay(0.85, function() p:Destroy() end)
     end
 end
-
 local function spawnBat(parent, opts)
     opts = opts or {}
     local size = opts.Size or math.random(22, 32)
@@ -266,7 +287,6 @@ local function spawnBat(parent, opts)
         Font = Enum.Font.GothamBold, TextColor3 = Color3.new(1, 1, 1),
         TextTransparency = opts.Transparency or (0.35 + math.random() * 0.25), ZIndex = z,
     }, holder)
-
     task.spawn(function()
         task.wait(math.random() * 1.2)
         local px = holder.Position.X.Scale
@@ -282,11 +302,9 @@ local function spawnBat(parent, opts)
     return holder
 end
 
---==== KEY SYSTEM ====--
 function UI:CreateKeySystem(options)
     options = options or {}
     local theme = resolveTheme(options.Theme or "GreyWhite")
-    
     local verifyKey = options.Verify
     local link = options.GetKeyURL or "https://diegoawan.github.io/IncrementalUiGetKey/"
     local isChecking = false
@@ -400,7 +418,7 @@ function UI:CreateKeySystem(options)
     }, card)
     corner(getBtn, 8)
     new("UIStroke", { Color = theme.Border, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, getBtn)
-    
+
     local submitBtn = new("TextButton", {
         Position = UDim2.new(0.38, 6, 0, 230), Size = UDim2.new(0.62, -30, 0, 40), BackgroundColor3 = Color3.new(1, 1, 1),
         Text = "Submit", TextColor3 = theme.AccentText, Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0, AutoButtonColor = false,
@@ -428,62 +446,46 @@ function UI:CreateKeySystem(options)
 
     local function attempt()
         if isChecking then return end
-
         local enteredKey = box.Text:match("^%s*(.-)%s*$")
-
         if enteredKey == "" then
             errorLbl.Text = "Please enter a key."
             errorLbl.TextColor3 = theme.Danger
             errorLbl.TextTransparency = 0
             return
         end
-
         if type(verifyKey) ~= "function" then
             errorLbl.Text = "Verification unavailable."
             errorLbl.TextColor3 = theme.Danger
             errorLbl.TextTransparency = 0
             return
         end
-
         isChecking = true
         errorLbl.Text = "Checking key..."
         errorLbl.TextColor3 = theme.Muted
         errorLbl.TextTransparency = 0
         submitBtn.Text = "Checking..."
-
         task.spawn(function()
             local callOk, valid, message = pcall(verifyKey, enteredKey)
-
             if callOk and valid == true then
                 errorLbl.TextColor3 = Color3.fromRGB(0, 0, 0)
                 errorLbl.Text = "Authentication Successful!"
                 boxStroke.Color = Color3.fromRGB(0, 0, 0)
-                
                 burst(card, card.AbsoluteSize.X / rootScale.Scale / 2, 250, theme.Success, 14, 60, 20)
                 task.wait(0.7)
-
                 tween(dim, { BackgroundTransparency = 1 }, 0.4)
                 tween(root, { Position = UDim2.fromScale(0.5, 1.5) }, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
                 task.wait(0.5)
-
                 if blur then blur:Destroy() end
-                
                 gui.Enabled = false
                 gui:Destroy()
-
-                if options.OnSuccess then
-                    options.OnSuccess()
-                end
+                if options.OnSuccess then options.OnSuccess() end
             else
                 isChecking = false
                 submitBtn.Text = "Submit"
-
                 errorLbl.TextColor3 = Color3.fromRGB(255, 80, 80)
                 errorLbl.Text = callOk and (message or "Invalid or expired key") or "Server connection failed"
                 errorLbl.TextTransparency = 0
-
                 boxStroke.Color = Color3.fromRGB(255, 80, 80)
-                
                 task.spawn(function()
                     local origin = root.Position
                     for i = 1, 6 do
@@ -496,14 +498,11 @@ function UI:CreateKeySystem(options)
             end
         end)
     end
-
     submitBtn.Activated:Connect(attempt)
     box.FocusLost:Connect(function(enter) if enter then attempt() end end)
-
     return gui
 end
 
---==== MAIN WINDOW ====--
 function UI:CreateWindow(options)
     options = options or {}
     local theme = resolveTheme(options.Theme or "Graphite")
@@ -638,7 +637,8 @@ function UI:CreateWindow(options)
     local Window = {
         ScreenGui = gui, Root = root, Main = main, Tabs = {}, ActiveTab = nil, Config = {}, NamedConfigs = {},
         Controls = {}, Theme = theme, ThemeName = themeName, Visible = true, Destroyed = false,
-        Keybind = options.Keybind or Enum.KeyCode.RightControl, _dd = nil, _fpsLabel = nil, _autoSave = false
+        Keybind = options.Keybind or Enum.KeyCode.RightControl, _dd = nil, _fpsLabel = nil, _autoSave = false,
+        _trail = true
     }
     table.insert(UI.Windows, Window)
 
@@ -911,6 +911,69 @@ function UI:CreateWindow(options)
             end
         end)
     end
+    FX.Orbs = function(tok)
+        for _ = 1, 12 do
+            local o = dot(rand(24, 60), rand() < 0.5 and theme.Accent or theme.Accent2)
+            o.Position = UDim2.fromScale(rand(), rand())
+            o.BackgroundTransparency = 0.9
+            o.Parent = fxLayer
+            task.spawn(function()
+                while fxToken == tok and o.Parent do
+                    local d = 5 + rand() * 5
+                    tween(o, {
+                        Position = UDim2.fromScale(rand(), rand()),
+                        BackgroundTransparency = 0.82 + rand() * 0.14,
+                        Size = UDim2.fromOffset(rand(24, 70), rand(24, 70)),
+                    }, d, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+                    task.wait(d)
+                end
+            end)
+        end
+    end
+    FX.Confetti = function(tok)
+        emit(tok, 30, {
+            prop = "BackgroundTransparency", base = 0.15, stagger = 6,
+            make = function()
+                local c = ({ theme.Accent, theme.Accent2, white })[rand(1, 3)]
+                return new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(rand(4, 6), rand(7, 11)), BackgroundColor3 = c, BorderSizePixel = 0, ZIndex = 1 })
+            end,
+            path = function()
+                local x = rand()
+                return UDim2.fromScale(x, -0.05), UDim2.fromScale(x + (rand() - 0.5) * 0.3, 1.05), 3.5 + rand() * 3
+            end,
+            rot = function() return rand(-720, 720) end,
+        })
+    end
+    FX.Comets = function(tok)
+        emit(tok, 6, {
+            prop = "BackgroundTransparency", base = 0.2, stagger = 5, style = Enum.EasingStyle.Quad,
+            make = function()
+                local f = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(90, 2), Rotation = 35, BackgroundColor3 = theme.Accent2, BorderSizePixel = 0, ZIndex = 1 })
+                new("UIGradient", { Transparency = NumberSequence.new({ nk(0, 1), nk(1, 0) }) }, f)
+                return f
+            end,
+            path = function()
+                local x = rand() * 0.7
+                return UDim2.fromScale(x, -0.1), UDim2.fromScale(x + 0.5, 1.1), 1 + rand() * 0.8
+            end,
+        })
+    end
+    FX.Ripples = function(tok)
+        task.spawn(function()
+            while fxToken == tok and fxLayer.Parent do
+                local ring = new("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.1 + rand() * 0.8, 0.1 + rand() * 0.8),
+                    Size = UDim2.fromOffset(6, 6), BackgroundTransparency = 1, ZIndex = 1,
+                }, fxLayer)
+                corner(ring, 999)
+                local st = new("UIStroke", { Color = rand() < 0.5 and theme.Accent or theme.Accent2, Thickness = 2, Transparency = 0.4 }, ring)
+                tween(ring, { Size = UDim2.fromOffset(150, 150) }, 2.2, Enum.EasingStyle.Quad)
+                tween(st, { Transparency = 1 }, 2.2, Enum.EasingStyle.Quad)
+                task.delay(2.3, function() ring:Destroy() end)
+                task.wait(0.5 + rand() * 0.8)
+            end
+        end)
+    end
 
     Window.Fx = "Matrix"
     Window.FxOverride = options.Fx
@@ -936,11 +999,24 @@ function UI:CreateWindow(options)
         return x >= 0 and y >= 0 and x <= main.AbsoluteSize.X / uiScale.Scale and y <= main.AbsoluteSize.Y / uiScale.Scale
     end
 
+    -- Cursor spotlight + trail
+    local lastTrail = 0
     connect(UIS.InputChanged, function(input)
         if input.UserInputType ~= Enum.UserInputType.MouseMovement or not Window.Visible then return end
         local x, y = toMain(input.Position)
         if insideMain(x, y) then
             tween(spot, { Position = UDim2.fromOffset(x, y), ImageTransparency = 0.82 }, 0.18, Enum.EasingStyle.Quad)
+            if Window._trail ~= false and os.clock() - lastTrail > 0.03 then
+                lastTrail = os.clock()
+                local p = new("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(7, 7),
+                    BackgroundColor3 = rand() < 0.5 and theme.Accent or theme.Accent2, BackgroundTransparency = 0.3,
+                    BorderSizePixel = 0, ZIndex = 40,
+                }, main)
+                corner(p, 999)
+                tween(p, { Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1 }, 0.5, Enum.EasingStyle.Quad)
+                task.delay(0.55, function() p:Destroy() end)
+            end
         else
             tween(spot, { ImageTransparency = 1 }, 0.3)
         end
@@ -1146,6 +1222,8 @@ function UI:CreateWindow(options)
         Window.ThemeName = type(name) == "string" and name or "Custom"
         refreshTheme()
         applyFx(Window.FxOverride or theme.Fx or "Bats")
+        playSweep()
+        burst(main, main.AbsoluteSize.X / uiScale.Scale / 2, main.AbsoluteSize.Y / uiScale.Scale / 2, theme.Accent, 16, 90, 60)
         return true
     end
     function Window:SetCustomTheme(custom)
@@ -1201,7 +1279,7 @@ function UI:CreateWindow(options)
         task.spawn(function()
             for i = 1, #full do
                 if typeToken ~= tok then tab.Title.Text = full return end
-                tab.Title.Text = string.sub(full, 1, i) .. "▌"
+                tab.Title.Text = string.sub(full, 1, i) .. "_"
                 task.wait(0.03)
             end
             tab.Title.Text = full
@@ -1218,13 +1296,20 @@ function UI:CreateWindow(options)
                     tween(sec.Line, { Size = UDim2.new(1, 10, 0, 1) }, 0.8)
                 end
             end)
+            for j, row in ipairs(sec.Rows) do
+                if row.Anim and row.Frame.Parent then
+                    row.Frame.BackgroundTransparency = 1
+                    task.delay((i - 1) * 0.07 + j * 0.05, function()
+                        if row.Frame.Parent then tween(row.Frame, { BackgroundTransparency = 0.2 }, 0.4) end
+                    end)
+                end
+            end
         end
         applySearch()
     end
 
     local launcher
     local visToken = 0
-
     local function hideLauncher()
         if launcher then launcher:Destroy() launcher = nil end
     end
@@ -1301,11 +1386,7 @@ function UI:CreateWindow(options)
             tween(shadow, { ImageTransparency = 1 }, 0.2)
             task.delay(0.26, function() if visToken == tok then root.Visible = false end end)
             showLauncher()
-            
-            -- Auto-save logic
-            if Window._autoSave then
-                Window:SaveToFile("autosave")
-            end
+            if Window._autoSave then Window:SaveToFile("autosave") end
         end
     end
     function Window:Toggle() Window:SetVisible(not Window.Visible) end
@@ -1341,7 +1422,7 @@ function UI:CreateWindow(options)
         cfg = cfg or {}
         local kind = cfg.Type or "Info"
         local colorKey = kind == "Success" and "Success" or kind == "Warning" and "Warning" or kind == "Error" and "Danger" or "Accent"
-        local glyph = kind == "Success" and "✓" or kind == "Warning" and "!" or kind == "Error" and "✕" or "i"
+        local glyphTxt = kind == "Success" and "+" or kind == "Warning" and "!" or kind == "Error" and "x" or "i"
         local dur = cfg.Duration or 4
         local content = cfg.Content or ""
 
@@ -1365,7 +1446,7 @@ function UI:CreateWindow(options)
 
         local icon = make("Frame", { Position = UDim2.fromOffset(14, 10), Size = UDim2.fromOffset(18, 18), BorderSizePixel = 0, BackgroundTransparency = 0.8 }, card, { BackgroundColor3 = colorKey })
         corner(icon, 999)
-        label(icon, glyph, colorKey, { Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center })
+        label(icon, glyphTxt, colorKey, { Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center })
         local iconScale = new("UIScale", { Scale = 0 }, icon)
         task.delay(0.25, function() tween(iconScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Back) end)
 
@@ -1456,7 +1537,6 @@ function UI:CreateWindow(options)
 
     function Window:CreateTab(name, icon)
         local Tab = { Name = name, Sections = {}, Index = #Window.Tabs + 1 }
-
         local btn = new("TextButton", {
             Size = UDim2.new(1, 0, 0, 34), Text = "", AutoButtonColor = false, BorderSizePixel = 0,
             BackgroundTransparency = 1, LayoutOrder = Tab.Index,
@@ -1531,13 +1611,13 @@ function UI:CreateWindow(options)
                 local lx, ly = (m.X - r.AbsolutePosition.X) / s, (m.Y - r.AbsolutePosition.Y) / s
                 local fx = new("CanvasGroup", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 10 }, r)
                 corner(fx, 8)
-                local dot = new("Frame", {
+                local dotF = new("Frame", {
                     AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(lx, ly), Size = UDim2.fromOffset(0, 0),
                     BackgroundColor3 = theme.Accent, BackgroundTransparency = 0.8, BorderSizePixel = 0,
                 }, fx)
-                corner(dot, 999)
+                corner(dotF, 999)
                 local d = math.max(r.AbsoluteSize.X, r.AbsoluteSize.Y) / s * 2.4
-                tween(dot, { Size = UDim2.fromOffset(d, d), BackgroundTransparency = 1 }, 0.6, Enum.EasingStyle.Quad)
+                tween(dotF, { Size = UDim2.fromOffset(d, d), BackgroundTransparency = 1 }, 0.6, Enum.EasingStyle.Quad)
                 task.delay(0.65, function() fx:Destroy() end)
             end
 
@@ -1565,7 +1645,7 @@ function UI:CreateWindow(options)
                     BorderSizePixel = 0, ZIndex = 3,
                 }, r, { BackgroundColor3 = "Accent" })
                 corner(edge, 999)
-                table.insert(Section.Rows, { Frame = r, Text = text or "" })
+                table.insert(Section.Rows, { Frame = r, Text = text or "", Anim = true })
                 r.MouseEnter:Connect(function()
                     tween(r, { BackgroundColor3 = theme.ElementHover }, 0.15)
                     tween(st, { Color = theme.Accent, Transparency = 0.6 }, 0.2)
@@ -1597,7 +1677,7 @@ function UI:CreateWindow(options)
                 cfg = cfg or {}
                 local r, st = makeRow(38, cfg.Name, true)
                 local lbl = rowLabel(r, cfg.Name or "Button", 40)
-                local arrow = label(r, "›", "Muted", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, -1), Size = UDim2.fromOffset(16, 20), TextSize = 20, TextXAlignment = Enum.TextXAlignment.Center })
+                local arrow = label(r, ">", "Muted", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, -1), Size = UDim2.fromOffset(16, 20), TextSize = 14, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Center })
                 r.MouseEnter:Connect(function() tween(arrow, { Position = UDim2.new(1, -8, 0.5, -1), TextColor3 = theme.Accent }, 0.2, Enum.EasingStyle.Back) end)
                 r.MouseLeave:Connect(function() tween(arrow, { Position = UDim2.new(1, -12, 0.5, -1), TextColor3 = theme.Muted }, 0.2) end)
                 r.Activated:Connect(function()
@@ -1683,12 +1763,17 @@ function UI:CreateWindow(options)
                 corner(thumb, 999)
                 local thumbStroke = strokeT(thumb, "Accent", 2, 0)
 
+                local active = false
                 local function render(instant)
                     local pct = (value - min) / (max - min)
                     local d = instant and 0 or 0.1
                     tween(fill, { Size = UDim2.new(pct, 0, 1, 0) }, d, Enum.EasingStyle.Quad)
                     tween(thumb, { Position = UDim2.new(pct, 0, 0.5, 0) }, d, Enum.EasingStyle.Quad)
                     disp.Text = tostring(value) .. suffix
+                    tween(thumbStroke, { Thickness = 4, Transparency = 0.5 }, 0.1)
+                    task.delay(0.12, function()
+                        if not active then tween(thumbStroke, { Thickness = 2, Transparency = 0 }, 0.25) end
+                    end)
                 end
                 local function set(nv)
                     local snapped = snap(nv)
@@ -1701,7 +1786,6 @@ function UI:CreateWindow(options)
                     if cfg.Callback then task.spawn(cfg.Callback, value) end
                 end
 
-                local active = false
                 local function fromInput(input)
                     local pct = math.clamp((input.Position.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
                     set(min + (max - min) * pct)
@@ -1747,9 +1831,9 @@ function UI:CreateWindow(options)
                     AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -34, 0.5, 0), Size = UDim2.fromOffset(170, 18),
                     TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd,
                 })
-                local chev = label(r, "▾", "Muted", {
+                local chev = label(r, ">", "Muted", {
                     AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -18, 0.5, 0), Size = UDim2.fromOffset(16, 16),
-                    TextSize = 12, TextXAlignment = Enum.TextXAlignment.Center,
+                    TextSize = 13, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Center, Rotation = 90,
                 })
 
                 local function set(option)
@@ -1819,9 +1903,9 @@ function UI:CreateWindow(options)
 
                     Window._dd = {
                         menu = menu, backdrop = backdrop, owner = r,
-                        onClose = function() tween(chev, { Rotation = 0 }, 0.2) end,
+                        onClose = function() tween(chev, { Rotation = 90 }, 0.2) end,
                     }
-                    tween(chev, { Rotation = 180 }, 0.2)
+                    tween(chev, { Rotation = 270 }, 0.2)
                     tween(menu, { Size = UDim2.fromOffset(menuW, menuH) }, 0.25)
                 end)
 
@@ -1996,9 +2080,6 @@ function UI:CreateWindow(options)
         return Tab
     end
 
-    -- ============================================================
-    -- AUTOMATIC SETTINGS TAB INJECTION
-    -- ============================================================
     local settingsTab = Window:CreateTab("Settings", "rbxassetid://10709798938")
 
     local appearanceSec = settingsTab:CreateSection("Appearance")
@@ -2010,7 +2091,7 @@ function UI:CreateWindow(options)
     })
     appearanceSec:CreateDropdown({
         Name = "Background Effect",
-        Options = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "None" },
+        Options = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "Orbs", "Confetti", "Comets", "Ripples", "None" },
         CurrentOption = Window.FxOverride or "Theme Default",
         Callback = function(v) Window:SetFx(v) end,
     })
@@ -2029,13 +2110,16 @@ function UI:CreateWindow(options)
     utilitySec:CreateToggle({
         Name = "Remember Settings",
         CurrentValue = UI.AutoSave,
-        Callback = function(v) 
-            UI.AutoSave = v 
+        Callback = function(v)
+            UI.AutoSave = v
             Window._autoSave = v
-            if v then
-                Window:LoadFromFile("autosave")
-            end
+            if v then Window:LoadFromFile("autosave") end
         end,
+    })
+    utilitySec:CreateToggle({
+        Name = "Cursor Trail",
+        CurrentValue = true,
+        Callback = function(v) Window._trail = v end,
     })
     if Window._fpsLabel then
         utilitySec:CreateToggle({
@@ -2051,9 +2135,6 @@ function UI:CreateWindow(options)
         end,
     })
 
-    -- ============================================================
-    -- DEVELOPER CONSOLE
-    -- ============================================================
     local consoleSec = settingsTab:CreateSection("Developer Console")
     local consoleFrame = new("ScrollingFrame", {
         Size = UDim2.new(1, 0, 0, 150), BackgroundColor3 = theme.Background, BorderSizePixel = 0,
@@ -2062,24 +2143,21 @@ function UI:CreateWindow(options)
     corner(consoleFrame, 6)
     strokeT(consoleFrame, "Border", 1, 0.5)
     new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, consoleFrame)
-    local consoleLayout = new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Bottom }, consoleFrame)
+    new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Bottom }, consoleFrame)
 
     local consoleMsgs = 0
     local logConn = LogService.MessageOut:Connect(function(msg, msgType)
         if not consoleFrame.Parent then return end
         if consoleMsgs > 100 then
-            if consoleFrame:GetChildren()[1] and consoleFrame:GetChildren()[1]:IsA("TextLabel") then
-                consoleFrame:GetChildren()[1]:Destroy()
-            end
+            local first = consoleFrame:GetChildren()[1]
+            if first and first:IsA("TextLabel") then first:Destroy() end
         else
             consoleMsgs += 1
         end
-        
         local color = theme.Text
         if msgType == Enum.MessageType.MessageError then color = theme.Danger
         elseif msgType == Enum.MessageType.MessageWarning then color = theme.Warning
         elseif msgType == Enum.MessageType.MessageInfo then color = theme.Accent end
-
         local l = new("TextLabel", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
             Text = "> " .. msg, TextColor3 = color, Font = Enum.Font.Code, TextSize = 11,
