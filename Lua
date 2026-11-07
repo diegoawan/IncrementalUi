@@ -1,9 +1,9 @@
 --[[
-    IncrementalUi v5.2.0 — Library File
-    - Fixed glyphs (no more boxes)
-    - New themes: Sunset, Gold, Void, Toxic, Crimson, Cloud
-    - New effects: Orbs, Confetti, Comets, Ripples
-    - Cursor trail + theme flash + row cascade + slider glow
+    IncrementalUi v5.3.0 — Advanced Effects + Sound Edition
+    - 13 new effects (Warp, Vortex, Lightning, Constellation, Fireworks, Equalizer, Waves, Glitch, Helix, Orbs, Confetti, Comets, Ripples)
+    - Full sound system with per-effect SFX profiles
+    - Theme→effect auto-mapping
+    - Sound volume/mute controls in Settings
 ]]
 
 local UI = {}
@@ -17,14 +17,73 @@ local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
 local LogService = game:GetService("LogService")
+local SoundService = game:GetService("SoundService")
 local Player = Players.LocalPlayer
 
-UI.Version = "5.2.0"
+UI.Version = "5.3.0"
 UI.Windows = {}
 UI.AntiAfk = false
 UI.AutoSave = false
+UI.SoundEnabled = true
+UI.SoundVolume = 0.5
 
 local rgb = Color3.fromRGB
+
+UI.Sounds = {
+    Ping   = "rbxasset://sounds/electronicpingshort.wav",
+    Switch = "rbxasset://sounds/switch.wav",
+    Snap   = "rbxasset://sounds/snap.mp3",
+    Water  = "rbxasset://sounds/impact_water.mp3",
+    Bass   = "rbxasset://sounds/bass.wav",
+}
+
+UI.FxSfx = {
+    Bats          = { "Snap",   2.4, 0.25, 2.0 },
+    Snow          = { "Ping",   2.2, 0.18, 3.2 },
+    Sakura        = { "Ping",   1.7, 0.16, 3.6 },
+    Embers        = { "Snap",   0.8, 0.30, 1.0 },
+    Bubbles       = { "Water",  1.7, 0.30, 1.6 },
+    Matrix        = { "Ping",   3.2, 0.14, 0.55 },
+    Stars         = { "Ping",   2.8, 0.14, 2.4 },
+    Aurora        = { "Bass",   0.55, 0.30, 4.5 },
+    Grid          = { "Switch", 0.7, 0.30, 2.8 },
+    Fireflies     = { "Ping",   2.4, 0.12, 2.0 },
+    Rain          = { "Water",  2.4, 0.18, 0.45 },
+    Orbs          = { "Bass",   0.8, 0.25, 3.2 },
+    Confetti      = { "Snap",   1.5, 0.25, 0.9 },
+    Comets        = { "Switch", 2.2, 0.25, 2.6 },
+    Ripples       = { "Water",  1.3, 0.30, 1.2 },
+    Warp          = { "Bass",   0.5, 0.35, 0 },
+    Vortex        = { "Bass",   0.45, 0.35, 3.8 },
+    Lightning     = { "Water",  2.0, 0.12, 0.5 },
+    Constellation = { "Ping",   2.6, 0.14, 1.6 },
+    Fireworks     = { "Snap",   1.0, 0.50, 0 },
+    Equalizer     = { "Bass",   1.1, 0.40, 0 },
+    Waves         = { "Water",  0.7, 0.35, 3.4 },
+    Glitch        = { "Snap",   0.5, 0.40, 0 },
+    Helix         = { "Ping",   1.5, 0.14, 1.1 },
+}
+
+local sfxLast = {}
+local function sfx(base, vol, pitch, cd)
+    if not UI.SoundEnabled then return end
+    local id = UI.Sounds[base]
+    if not id then return end
+    local now = os.clock()
+    if now - (sfxLast[base] or 0) < (cd or 0.04) then return end
+    sfxLast[base] = now
+    pcall(function()
+        local s = Instance.new("Sound")
+        s.SoundId = id
+        s.Volume = math.clamp((vol or 0.5) * UI.SoundVolume, 0, 5)
+        s.PlaybackSpeed = math.clamp(pitch or 1, 0.2, 4)
+        s.Parent = SoundService
+        s.Ended:Connect(function() s:Destroy() end)
+        s:Play()
+        task.delay(5, function() if s.Parent then s:Destroy() end end)
+    end)
+end
+UI.PlaySound = sfx
 
 pcall(function()
     local VirtualUser = game:GetService("VirtualUser")
@@ -193,6 +252,15 @@ UI.ThemeOrder = {
 }
 function UI:GetThemeNames() return table.clone(UI.ThemeOrder) end
 UI.ThemeAliases = { GrayBlack = "Graphite", Grey = "Graphite", Gray = "Graphite", White = "Light", Dark = "Midnight", Purple = "Amethyst" }
+
+UI.ThemeFx = {
+    GreyWhite = "Equalizer", Midnight = "Constellation", Light = "Constellation", Cloud = "Waves",
+    Amethyst = "Vortex", Emerald = "Helix", Rose = "Fireworks", Ocean = "Waves", Nebula = "Warp",
+    Cyberpunk = "Glitch", Storm = "Lightning", Void = "Vortex", Gold = "Fireworks", Sunset = "Comets",
+}
+for themeName, fxName in pairs(UI.ThemeFx) do
+    if UI.Themes[themeName] then UI.Themes[themeName].Fx = fxName end
+end
 
 local function resolveTheme(name)
     if type(name) == "table" then
@@ -704,6 +772,34 @@ function UI:CreateWindow(options)
         end
     end
 
+    local W, H = math.floor(fullW), math.floor(fullH)
+
+    local function fxPing(mult)
+        if not Window.Visible then return end
+        local p = UI.FxSfx[Window.Fx]
+        if p then sfx(p[1], p[3], p[2] * (mult or 1) * (0.9 + rand() * 0.2), 0.1) end
+    end
+
+    local function step(tok, fn)
+        local c
+        c = RunService.RenderStepped:Connect(function(dt)
+            if fxToken ~= tok or not fxLayer.Parent then
+                c:Disconnect()
+                return
+            end
+            if not Window.Visible then return end
+            fn(math.min(dt, 0.05))
+        end)
+        table.insert(conns, c)
+    end
+
+    local function setLine(f, x1, y1, x2, y2, thickness)
+        local dx, dy = x2 - x1, y2 - y1
+        f.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), thickness or 1)
+        f.Position = UDim2.fromOffset((x1 + x2) / 2, (y1 + y2) / 2)
+        f.Rotation = math.deg(math.atan2(dy, dx))
+    end
+
     local FX = {}
     FX.Bats = function() Window:SetBats(batCount) end
     FX.Snow = function(tok)
@@ -974,16 +1070,446 @@ function UI:CreateWindow(options)
             end
         end)
     end
+    FX.Warp = function(tok)
+        local cx, cy = W / 2, H / 2
+        local stars = {}
+        for i = 1, 80 do
+            local f = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+            f.BackgroundColor3 = rand() < 0.3 and theme.Accent or (rand() < 0.5 and theme.Accent2 or white)
+            stars[i] = { f = f, a = rand() * math.pi * 2, r = rand() * 0.9, spd = 0.3 + rand() * 0.9 }
+        end
+        local glow2 = new("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(160, 160),
+            BackgroundTransparency = 1, Image = SHADOW_IMAGE, ImageColor3 = theme.Accent, ImageTransparency = 0.85,
+            ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450), ZIndex = 1,
+        }, fxLayer)
+        local boost, target = 0, 0
+        task.spawn(function()
+            while fxToken == tok and fxLayer.Parent do
+                task.wait(5 + rand() * 4)
+                if fxToken ~= tok then break end
+                sfx("Switch", 0.6, 0.5)
+                sfx("Bass", 0.7, 0.4)
+                target = 7
+                task.wait(1.3)
+                target = 0
+                sfx("Switch", 0.4, 1.6)
+            end
+        end)
+        step(tok, function(dt)
+            boost += (target - boost) * math.min(1, dt * 3)
+            glow2.ImageTransparency = math.clamp(0.85 - boost * 0.09, 0.2, 0.9)
+            glow2.Size = UDim2.fromOffset(160 + boost * 50, 160 + boost * 50)
+            for _, s in ipairs(stars) do
+                s.r += (0.12 + s.r * 0.9) * s.spd * (1 + boost * 3) * dt
+                if s.r > 1.1 then s.r = 0.02 + rand() * 0.05; s.a = rand() * math.pi * 2 end
+                local d = s.r * math.max(W, H) * 0.75
+                local len = 2 + s.r * s.r * (6 + boost * 45)
+                local sz = 1 + s.r * 2.2
+                s.f.Position = UDim2.fromOffset(cx + math.cos(s.a) * d, cy + math.sin(s.a) * d)
+                s.f.Size = UDim2.fromOffset(len, sz)
+                s.f.Rotation = math.deg(s.a)
+                s.f.BackgroundTransparency = math.clamp(1 - s.r * 2.2, 0.05, 1)
+            end
+        end)
+    end
+    FX.Vortex = function(tok)
+        local cx, cy = W / 2, H / 2
+        local maxR = W * 0.55
+        local glow2 = new("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(260, 120),
+            BackgroundTransparency = 1, Image = SHADOW_IMAGE, ImageColor3 = theme.Accent, ImageTransparency = 0.6,
+            ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450), ZIndex = 1,
+        }, fxLayer)
+        task.spawn(function()
+            while fxToken == tok and glow2.Parent do
+                tween(glow2, { ImageTransparency = 0.45, Size = UDim2.fromOffset(300, 140) }, 1.6, Enum.EasingStyle.Sine)
+                task.wait(1.6)
+                tween(glow2, { ImageTransparency = 0.7, Size = UDim2.fromOffset(250, 115) }, 1.6, Enum.EasingStyle.Sine)
+                task.wait(1.6)
+            end
+        end)
+        local hole = dot(34, rgb(0, 0, 0))
+        hole.Position = UDim2.fromOffset(cx, cy)
+        hole.ZIndex = 2
+        hole.Parent = fxLayer
+        new("UIStroke", { Color = theme.Accent2, Thickness = 2, Transparency = 0.2 }, hole)
+        local ps = {}
+        for i = 1, 110 do
+            local f = dot(2, white)
+            f.Parent = fxLayer
+            ps[i] = { f = f, a = rand() * math.pi * 2, r = 40 + rand() * maxR, w = 0.5 + rand() * 0.8 }
+        end
+        step(tok, function(dt)
+            for _, p in ipairs(ps) do
+                p.a += (p.w * 14 / math.sqrt(p.r)) * dt
+                p.r -= (8 + 900 / p.r) * dt
+                if p.r < 22 then p.r = maxR * (0.7 + rand() * 0.3); p.a = rand() * math.pi * 2 end
+                local front = math.sin(p.a) * 0.5 + 0.5
+                local s = math.clamp((1.5 + 2.5 * front) * (1 + 40 / p.r), 1, 7)
+                p.f.Position = UDim2.fromOffset(cx + math.cos(p.a) * p.r, cy + math.sin(p.a) * p.r * 0.42)
+                p.f.Size = UDim2.fromOffset(s, s)
+                p.f.BackgroundColor3 = theme.Accent:Lerp(theme.Accent2, math.clamp(p.r / maxR, 0, 1))
+                p.f.BackgroundTransparency = math.clamp(0.15 + (1 - front) * 0.5 + math.max(0, (36 - p.r) / 36), 0, 1)
+                p.f.ZIndex = front > 0.5 and 3 or 1
+            end
+        end)
+    end
+    FX.Lightning = function(tok)
+        FX.Rain(tok)
+        local function genBolt(x1, y1, x2, y2, iters, off)
+            local pts = { { x1, y1 }, { x2, y2 } }
+            for _ = 1, iters do
+                local np = {}
+                for i = 1, #pts - 1 do
+                    local a, b = pts[i], pts[i + 1]
+                    local dx, dy = b[1] - a[1], b[2] - a[2]
+                    local l = math.sqrt(dx * dx + dy * dy) + 1e-3
+                    local o = (rand() - 0.5) * 2 * off
+                    np[#np + 1] = a
+                    np[#np + 1] = { (a[1] + b[1]) / 2 + (-dy / l) * o, (a[2] + b[2]) / 2 + (dx / l) * o }
+                end
+                np[#np + 1] = pts[#pts]
+                pts = np
+                off *= 0.55
+            end
+            return pts
+        end
+        local function drawBolt(pts, thick, list)
+            for i = 1, #pts - 1 do
+                local a, b = pts[i], pts[i + 1]
+                for layer = 1, 2 do
+                    local f = new("Frame", {
+                        AnchorPoint = Vector2.new(0.5, 0.5), BorderSizePixel = 0, ZIndex = 3,
+                        BackgroundColor3 = layer == 1 and theme.Accent2 or white, BackgroundTransparency = layer == 1 and 0.6 or 0,
+                    }, fxLayer)
+                    setLine(f, a[1], a[2], b[1], b[2], layer == 1 and thick * 4 or thick)
+                    list[#list + 1] = f
+                end
+            end
+        end
+        task.spawn(function()
+            while fxToken == tok and fxLayer.Parent do
+                task.wait(3 + rand() * 5)
+                if fxToken ~= tok then break end
+                if not Window.Visible then continue end
+                local sx = W * (0.15 + rand() * 0.7)
+                local ex = sx + (rand() - 0.5) * W * 0.25
+                local ey = H * (0.55 + rand() * 0.4)
+                local list = {}
+                local mainBolt = genBolt(sx, -10, ex, ey, 5, 50)
+                drawBolt(mainBolt, 2, list)
+                for i = 3, #mainBolt - 3, 4 do
+                    if rand() < 0.45 then
+                        local p = mainBolt[i]
+                        drawBolt(genBolt(p[1], p[2], p[1] + (rand() - 0.5) * 160, p[2] + 30 + rand() * 90, 3, 18), 1, list)
+                    end
+                end
+                local flash = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = white, BackgroundTransparency = 0.75, BorderSizePixel = 0, ZIndex = 2 }, fxLayer)
+                tween(flash, { BackgroundTransparency = 1 }, 0.4)
+                task.delay(0.45, function() flash:Destroy() end)
+                sfx("Snap", 0.8, 0.5)
+                task.delay(0.3, function() sfx("Bass", 1.0, 0.5) end)
+                task.delay(0.55, function() sfx("Water", 0.5, 0.4) end)
+                task.wait(0.07)
+                for _, f in ipairs(list) do f.Visible = false end
+                task.wait(0.05)
+                for _, f in ipairs(list) do f.Visible = true end
+                sfx("Snap", 0.6, 0.8)
+                task.wait(0.1)
+                for _, f in ipairs(list) do tween(f, { BackgroundTransparency = 1 }, 0.3) end
+                task.wait(0.35)
+                for _, f in ipairs(list) do f:Destroy() end
+            end
+        end)
+    end
+    FX.Constellation = function(tok)
+        local N = 22
+        local nodes = {}
+        for i = 1, N do
+            local d = dot(rand(3, 5), rand() < 0.5 and theme.Accent or theme.Accent2)
+            d.Parent = fxLayer
+            nodes[i] = { f = d, x = rand() * W, y = rand() * H, vx = (rand() - 0.5) * 26, vy = (rand() - 0.5) * 26 }
+        end
+        local lines = {}
+        local function getLine(key)
+            local l = lines[key]
+            if not l then
+                l = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = theme.Accent, BorderSizePixel = 0, ZIndex = 1, Visible = false }, fxLayer)
+                lines[key] = l
+            end
+            return l
+        end
+        local R = 110
+        step(tok, function(dt)
+            local m = UIS:GetMouseLocation()
+            local mx = (m.X - fxLayer.AbsolutePosition.X) / uiScale.Scale
+            local my = (m.Y - fxLayer.AbsolutePosition.Y) / uiScale.Scale
+            local mouseIn = mx > 0 and my > 0 and mx < W and my < H
+            for _, n in ipairs(nodes) do
+                n.x += n.vx * dt
+                n.y += n.vy * dt
+                if n.x < 0 or n.x > W then n.vx = -n.vx; n.x = math.clamp(n.x, 0, W) end
+                if n.y < 0 or n.y > H then n.vy = -n.vy; n.y = math.clamp(n.y, 0, H) end
+                if mouseIn then
+                    local dx, dy = mx - n.x, my - n.y
+                    local d = math.sqrt(dx * dx + dy * dy)
+                    if d < 140 and d > 1 then n.x += dx / d * dt * 30; n.y += dy / d * dt * 30 end
+                end
+                n.f.Position = UDim2.fromOffset(n.x, n.y)
+            end
+            for i = 1, N do
+                local a = nodes[i]
+                for j = i + 1, N do
+                    local b = nodes[j]
+                    local dx, dy = a.x - b.x, a.y - b.y
+                    local d = math.sqrt(dx * dx + dy * dy)
+                    local l = lines[i * 100 + j]
+                    if d < R then
+                        l = l or getLine(i * 100 + j)
+                        l.Visible = true
+                        setLine(l, a.x, a.y, b.x, b.y, 1)
+                        l.BackgroundTransparency = 0.25 + (d / R) * 0.75
+                    elseif l and l.Visible then
+                        l.Visible = false
+                    end
+                end
+                local key = 10000 + i
+                local l = lines[key]
+                local d = mouseIn and math.sqrt((a.x - mx) ^ 2 + (a.y - my) ^ 2) or 1e9
+                if d < 150 then
+                    l = l or getLine(key)
+                    l.BackgroundColor3 = theme.Accent2
+                    l.Visible = true
+                    setLine(l, a.x, a.y, mx, my, 1.5)
+                    l.BackgroundTransparency = 0.1 + d / 150 * 0.8
+                elseif l and l.Visible then
+                    l.Visible = false
+                end
+            end
+        end)
+    end
+    FX.Fireworks = function(tok)
+        local ps = {}
+        local G = 220
+        local function add(x, y, vx, vy, life, size, col, kind)
+            if #ps > 400 then return end
+            local f = dot(size, col)
+            f.Position = UDim2.fromOffset(x, y)
+            f.Parent = fxLayer
+            ps[#ps + 1] = { f = f, x = x, y = y, vx = vx, vy = vy, life = life, max = life, kind = kind, trail = 0 }
+        end
+        local function explode(x, y)
+            local ring = rand() < 0.5
+            local n = ring and 30 or 40
+            for i = 1, n do
+                local a = i / n * math.pi * 2
+                local sp = ring and 120 or (50 + rand() * 120)
+                add(x, y, math.cos(a) * sp, math.sin(a) * sp, 1.1 + rand() * 0.6, rand(2, 4), i % 2 == 0 and theme.Accent or theme.Accent2, "spark")
+            end
+            sfx("Snap", 0.8, 0.6)
+            sfx("Bass", 0.5, 0.9)
+            for k = 1, 3 do task.delay(0.15 * k, function() sfx("Snap", 0.3, 1.6 + rand()) end) end
+        end
+        task.spawn(function()
+            while fxToken == tok and fxLayer.Parent do
+                task.wait(0.8 + rand() * 1.8)
+                if fxToken ~= tok then break end
+                if not Window.Visible then continue end
+                local vy = -(260 + rand() * 80)
+                add(W * (0.15 + rand() * 0.7), H + 5, (rand() - 0.5) * 30, vy, (-vy / G) * 0.9, 3, white, "rocket")
+                sfx("Switch", 0.35, 2.4)
+            end
+        end)
+        step(tok, function(dt)
+            for i = #ps, 1, -1 do
+                local p = ps[i]
+                p.life -= dt
+                if p.life <= 0 then
+                    if p.kind == "rocket" then explode(p.x, p.y) end
+                    p.f:Destroy()
+                    table.remove(ps, i)
+                else
+                    if p.kind ~= "trail" then p.vy += G * dt end
+                    if p.kind == "spark" then p.vx *= (1 - dt * 1.2) end
+                    p.x += p.vx * dt
+                    p.y += p.vy * dt
+                    p.f.Position = UDim2.fromOffset(p.x, p.y)
+                    local k = p.life / p.max
+                    if p.kind == "rocket" then
+                        p.trail -= dt
+                        if p.trail <= 0 then p.trail = 0.03; add(p.x, p.y, 0, 0, 0.4, 2, theme.Accent2, "trail") end
+                    else
+                        p.f.BackgroundTransparency = 1 - k * (0.7 + rand() * 0.3)
+                    end
+                end
+            end
+        end)
+    end
+    FX.Equalizer = function(tok)
+        local n = 30
+        local bw = W / n
+        local bars = {}
+        for i = 1, n do
+            local b = new("Frame", {
+                AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset((i - 0.5) * bw, H), Size = UDim2.fromOffset(bw - 3, 4),
+                BackgroundColor3 = theme.Accent:Lerp(theme.Accent2, i / n), BackgroundTransparency = 0.55, BorderSizePixel = 0, ZIndex = 1,
+            }, fxLayer)
+            corner(b, 2)
+            local cap = new("Frame", {
+                AnchorPoint = Vector2.new(0.5, 1), Size = UDim2.fromOffset(bw - 3, 2), BackgroundColor3 = white,
+                BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 1,
+            }, fxLayer)
+            bars[i] = { b = b, cap = cap, h = 0, peak = 0 }
+        end
+        local t, beat, kick = 0, 0, 0
+        step(tok, function(dt)
+            t += dt
+            beat += dt
+            if beat > 0.55 then beat = 0; kick = 1; sfx("Bass", 0.35, 1.1, 0.2) end
+            kick = math.max(0, kick - dt * 3)
+            for i, bar in ipairs(bars) do
+                local nz = math.clamp(math.noise(i * 0.35, t * 1.3, 0.5) * 1.2 + 0.5, 0, 1)
+                local shape = 0.25 + 0.75 * math.sin(i / n * math.pi)
+                local goal = (0.1 + nz * 0.55 * shape + kick * 0.3 * shape) * H * 0.55
+                bar.h += (goal - bar.h) * math.min(1, dt * 14)
+                bar.b.Size = UDim2.fromOffset(bw - 3, math.max(3, bar.h))
+                bar.peak = math.max(bar.peak - dt * 40, bar.h)
+                bar.cap.Position = UDim2.fromOffset((i - 0.5) * bw, H - bar.peak - 3)
+            end
+        end)
+    end
+    FX.Waves = function(tok)
+        local cols = 38
+        local cw = W / cols
+        local defs = {
+            { base = 0.42, amp = 14, freq = 0.022, speed = 0.9, tr = 0.88, col = theme.Accent2 },
+            { base = 0.32, amp = 11, freq = 0.030, speed = -1.2, tr = 0.84, col = theme.Accent:Lerp(theme.Accent2, 0.5) },
+            { base = 0.22, amp = 9, freq = 0.040, speed = 1.6, tr = 0.80, col = theme.Accent },
+        }
+        for _, d in ipairs(defs) do
+            d.bars = {}
+            for i = 1, cols do
+                d.bars[i] = new("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset((i - 0.5) * cw, H), Size = UDim2.fromOffset(cw + 1, 10),
+                    BackgroundColor3 = d.col, BackgroundTransparency = d.tr, BorderSizePixel = 0, ZIndex = 1,
+                }, fxLayer)
+            end
+        end
+        local t = 0
+        step(tok, function(dt)
+            t += dt
+            for _, d in ipairs(defs) do
+                for i, b in ipairs(d.bars) do
+                    local x = (i - 0.5) * cw
+                    local h = H * d.base + math.sin(x * d.freq + t * d.speed) * d.amp + math.sin(x * d.freq * 2.3 - t * d.speed * 0.7) * d.amp * 0.4
+                    b.Size = UDim2.fromOffset(cw + 1, h)
+                end
+            end
+        end)
+    end
+    FX.Glitch = function(tok)
+        for y = 0, H, 11 do
+            new("Frame", { Position = UDim2.fromOffset(0, y), Size = UDim2.fromOffset(W, 1), BackgroundColor3 = white, BackgroundTransparency = 0.95, BorderSizePixel = 0, ZIndex = 1 }, fxLayer)
+        end
+        local tintR = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = rgb(255, 0, 60), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 2 }, fxLayer)
+        local tintC = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = rgb(0, 255, 255), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 2 }, fxLayer)
+        task.spawn(function()
+            local scan = new("Frame", { Size = UDim2.new(1, 0, 0, 3), Position = UDim2.fromScale(0, -0.1), BackgroundColor3 = theme.Accent, BackgroundTransparency = 0.85, BorderSizePixel = 0, ZIndex = 2 }, fxLayer)
+            while fxToken == tok and scan.Parent do
+                scan.Position = UDim2.fromScale(0, -0.1)
+                tween(scan, { Position = UDim2.fromScale(0, 1.05) }, 2.4, Enum.EasingStyle.Linear)
+                task.wait(3)
+            end
+        end)
+        task.spawn(function()
+            while fxToken == tok and fxLayer.Parent do
+                task.wait(1.2 + rand() * 3)
+                if fxToken ~= tok then break end
+                if not Window.Visible then continue end
+                local slices = {}
+                for _ = 1, rand(6, 14) do
+                    slices[#slices + 1] = new("Frame", {
+                        Position = UDim2.fromOffset(rand(-30, W - 80), rand(0, H)),
+                        Size = UDim2.fromOffset(rand(60, math.floor(W * 0.7)), rand(2, 18)),
+                        BackgroundColor3 = ({ theme.Accent, theme.Accent2, white })[rand(1, 3)],
+                        BackgroundTransparency = 0.35 + rand() * 0.4, BorderSizePixel = 0, ZIndex = 3,
+                    }, fxLayer)
+                end
+                for _ = 1, 4 do
+                    tintR.Position = UDim2.fromOffset(rand(-8, 8), 0)
+                    tintC.Position = UDim2.fromOffset(rand(-8, 8), 0)
+                    tintR.BackgroundTransparency, tintC.BackgroundTransparency = 0.92, 0.92
+                    for _, s in ipairs(slices) do
+                        s.Position = UDim2.fromOffset(rand(-30, W - 80), s.Position.Y.Offset + rand(-6, 6))
+                        s.Visible = rand() < 0.75
+                    end
+                    sfx("Snap", 0.45, 0.4 + rand() * 2.6, 0.02)
+                    task.wait(0.05 + rand() * 0.06)
+                end
+                tintR.BackgroundTransparency, tintC.BackgroundTransparency = 1, 1
+                for _, s in ipairs(slices) do s:Destroy() end
+            end
+        end)
+    end
+    FX.Helix = function(tok)
+        local HW, HH = W * 1.3, H * 1.3
+        local holder = new("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(HW, HH),
+            BackgroundTransparency = 1, Rotation = -14, ZIndex = 1,
+        }, fxLayer)
+        local n = 30
+        local a, b, rungs = {}, {}, {}
+        for i = 1, n do
+            a[i] = dot(5, theme.Accent)
+            a[i].Parent = holder
+            b[i] = dot(5, theme.Accent2)
+            b[i].Parent = holder
+            rungs[i] = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = white, BorderSizePixel = 0, ZIndex = 1 }, holder)
+        end
+        local t = 0
+        step(tok, function(dt)
+            t += dt
+            for i = 1, n do
+                local x = (i - 1) / (n - 1) * HW
+                local ph = x * 0.016 + t * 1.6
+                local amp = HH * 0.2
+                local y1 = HH / 2 + math.sin(ph) * amp
+                local y2 = HH / 2 - math.sin(ph) * amp
+                local d = math.cos(ph)
+                local s1, s2 = 5 + d * 2.5, 5 - d * 2.5
+                a[i].Position = UDim2.fromOffset(x, y1)
+                a[i].Size = UDim2.fromOffset(s1, s1)
+                a[i].BackgroundTransparency = 0.5 - d * 0.4
+                b[i].Position = UDim2.fromOffset(x, y2)
+                b[i].Size = UDim2.fromOffset(s2, s2)
+                b[i].BackgroundTransparency = 0.5 + d * 0.4
+                setLine(rungs[i], x, y1, x, y2, 1)
+                rungs[i].BackgroundTransparency = 0.8 + math.abs(d) * 0.15
+            end
+        end)
+    end
 
     Window.Fx = "Matrix"
     Window.FxOverride = options.Fx
     local function applyFx(name)
         fxToken += 1
+        local tok = fxToken
         Window:ClearBats()
         fxLayer:ClearAllChildren()
         Window.Fx = name
         local f = FX[name]
-        if f then f(fxToken) end
+        if f then f(tok) end
+        local prof = UI.FxSfx[name]
+        if prof and (prof[4] or 0) > 0 then
+            task.spawn(function()
+                task.wait(0.5 + rand())
+                while fxToken == tok and fxLayer.Parent do
+                    fxPing()
+                    task.wait(prof[4] * (0.7 + rand() * 0.6))
+                end
+            end)
+        end
     end
     function Window:SetFx(name)
         if name == nil or name == "Theme" or name == "Theme Default" then Window.FxOverride = nil else Window.FxOverride = name end
@@ -999,7 +1525,6 @@ function UI:CreateWindow(options)
         return x >= 0 and y >= 0 and x <= main.AbsoluteSize.X / uiScale.Scale and y <= main.AbsoluteSize.Y / uiScale.Scale
     end
 
-    -- Cursor spotlight + trail
     local lastTrail = 0
     connect(UIS.InputChanged, function(input)
         if input.UserInputType ~= Enum.UserInputType.MouseMovement or not Window.Visible then return end
@@ -1192,9 +1717,9 @@ function UI:CreateWindow(options)
                 task.wait(1.4)
             end
         end)
-        local dot = new("Frame", { Position = UDim2.fromOffset(36, 40), Size = UDim2.fromOffset(9, 9), BackgroundColor3 = theme.Success, BorderSizePixel = 0, ZIndex = 3 }, footer)
-        corner(dot, 999)
-        strokeT(dot, "Sidebar", 2, 0)
+        local dotF = new("Frame", { Position = UDim2.fromOffset(36, 40), Size = UDim2.fromOffset(9, 9), BackgroundColor3 = theme.Success, BorderSizePixel = 0, ZIndex = 3 }, footer)
+        corner(dotF, 999)
+        strokeT(dotF, "Sidebar", 2, 0)
         label(footer, Player.DisplayName, "Text", { Position = UDim2.fromOffset(52, 13), Size = UDim2.new(1, -60, 0, 16), TextSize = 12, TextTruncate = Enum.TextTruncate.AtEnd })
         label(footer, "@" .. Player.Name, "Muted", { Position = UDim2.fromOffset(52, 29), Size = UDim2.new(1, -60, 0, 14), TextSize = 11, Font = Enum.Font.Gotham, TextTruncate = Enum.TextTruncate.AtEnd })
     end
@@ -1222,6 +1747,8 @@ function UI:CreateWindow(options)
         Window.ThemeName = type(name) == "string" and name or "Custom"
         refreshTheme()
         applyFx(Window.FxOverride or theme.Fx or "Bats")
+        sfx("Ping", 0.6, 0.9)
+        task.delay(0.12, function() sfx("Ping", 0.5, 1.35) end)
         playSweep()
         burst(main, main.AbsoluteSize.X / uiScale.Scale / 2, main.AbsoluteSize.Y / uiScale.Scale / 2, theme.Accent, 16, 90, 60)
         return true
@@ -1262,6 +1789,7 @@ function UI:CreateWindow(options)
         closeDropdown()
         local prev = Window.ActiveTab
         Window.ActiveTab = tab
+        if prev then sfx("Snap", 0.3, 1.9) end
         if prev then
             prev.Page.Visible = false
             prev.Paint()
@@ -1369,6 +1897,7 @@ function UI:CreateWindow(options)
         v = v == true
         if v == Window.Visible then return end
         Window.Visible = v
+        sfx("Switch", 0.45, v and 1.3 or 0.8)
         visToken += 1
         local tok = visToken
         closeDropdown()
@@ -1424,6 +1953,7 @@ function UI:CreateWindow(options)
         local colorKey = kind == "Success" and "Success" or kind == "Warning" and "Warning" or kind == "Error" and "Danger" or "Accent"
         local glyphTxt = kind == "Success" and "+" or kind == "Warning" and "!" or kind == "Error" and "x" or "i"
         local dur = cfg.Duration or 4
+        sfx("Ping", 0.55, kind == "Error" and 0.6 or kind == "Warning" and 0.9 or 1.4)
         local content = cfg.Content or ""
 
         local textH = 0
@@ -1681,6 +2211,7 @@ function UI:CreateWindow(options)
                 r.MouseEnter:Connect(function() tween(arrow, { Position = UDim2.new(1, -8, 0.5, -1), TextColor3 = theme.Accent }, 0.2, Enum.EasingStyle.Back) end)
                 r.MouseLeave:Connect(function() tween(arrow, { Position = UDim2.new(1, -12, 0.5, -1), TextColor3 = theme.Muted }, 0.2) end)
                 r.Activated:Connect(function()
+                    sfx("Ping", 0.4, 1.5)
                     pulse(st)
                     shine(r)
                     if cfg.Callback then task.spawn(cfg.Callback) end
@@ -1714,6 +2245,7 @@ function UI:CreateWindow(options)
                     paint(false)
                     if id then Window.Config[id] = value end
                     if cfg.Callback then task.spawn(cfg.Callback, value) end
+                    sfx("Switch", 0.45, value and 1.25 or 0.85)
                 end
                 r.Activated:Connect(function()
                     set(not value)
@@ -1784,6 +2316,7 @@ function UI:CreateWindow(options)
                     task.delay(0.09, function() tween(disp, { TextSize = 13 }, 0.15) end)
                     if id then Window.Config[id] = value end
                     if cfg.Callback then task.spawn(cfg.Callback, value) end
+                    sfx("Snap", 0.12, 1.4 + (value - min) / (max - min), 0.05)
                 end
 
                 local function fromInput(input)
@@ -1843,12 +2376,14 @@ function UI:CreateWindow(options)
                     if id then Window.Config[id] = option end
                     if cfg.Callback then task.spawn(cfg.Callback, option) end
                     closeDropdown()
+                    sfx("Ping", 0.4, 1.7)
                 end
 
                 r.Activated:Connect(function()
                     local d = Window._dd
                     if d and d.owner == r then closeDropdown() return end
                     closeDropdown()
+                    sfx("Switch", 0.35, 1.1)
 
                     local s = uiScale.Scale
                     local mainAbs, rowAbs, rowSz = main.AbsolutePosition, r.AbsolutePosition, r.AbsoluteSize
@@ -2091,7 +2626,7 @@ function UI:CreateWindow(options)
     })
     appearanceSec:CreateDropdown({
         Name = "Background Effect",
-        Options = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "Orbs", "Confetti", "Comets", "Ripples", "None" },
+        Options = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "Orbs", "Confetti", "Comets", "Ripples", "Warp", "Vortex", "Lightning", "Constellation", "Fireworks", "Equalizer", "Waves", "Glitch", "Helix", "None" },
         CurrentOption = Window.FxOverride or "Theme Default",
         Callback = function(v) Window:SetFx(v) end,
     })
@@ -2134,6 +2669,14 @@ function UI:CreateWindow(options)
             tween(root, { Position = UDim2.fromScale(0.5, 0.5) }, 0.3, Enum.EasingStyle.Back)
         end,
     })
+
+    local soundSec = settingsTab:CreateSection("Sound")
+    soundSec:CreateToggle({ Name = "Sound Effects", CurrentValue = UI.SoundEnabled, Callback = function(v) UI.SoundEnabled = v end })
+    soundSec:CreateSlider({
+        Name = "Volume", Range = { 0, 100 }, Increment = 5, Suffix = "%", CurrentValue = UI.SoundVolume * 100,
+        Callback = function(v) UI.SoundVolume = v / 100 end,
+    })
+    soundSec:CreateButton({ Name = "Preview Effect Sound", Callback = function() fxPing() end })
 
     local consoleSec = settingsTab:CreateSection("Developer Console")
     local consoleFrame = new("ScrollingFrame", {
