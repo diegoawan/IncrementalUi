@@ -2063,4 +2063,78 @@ function UI:CreateWindow(options)
             function Section:CreateDivider()
                 order += 1
                 local d = make("Frame", { Size = UDim2.new(1, 0, 0, 1), BorderSizePixel = 0, LayoutOrder = order, BackgroundColor3 = Color3.new(1, 1, 1) }, sf)
-                accentGrad(d
+                accentGrad(d, 0)
+                local g = d:FindFirstChildOfClass("UIGradient")
+                if g then
+                    g.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.35), NumberSequenceKeypoint.new(1, 1) })
+                end
+                table.insert(Section.Rows, { Frame = d, Text = "" })
+            end
+
+            return Section
+        end
+
+        table.insert(Window.Tabs, Tab)
+        if #Window.Tabs == 1 then task.defer(function() selectTab(Tab) end) end
+        return Tab
+    end
+
+    ---------------------------------------------------------------- ready-made settings tab
+    -- Window:CreateSettingsTab("Settings") adds a tab with a theme picker and a background-effect picker
+    function Window:CreateSettingsTab(tabName)
+        local tab = Window:CreateTab(tabName or "Settings")
+        local sec = tab:CreateSection("Appearance")
+        local ready = false -- ignore the callbacks fired while the dropdowns are being created
+
+        local names = UI:GetThemeNames()
+        sec:CreateDropdown({
+            Name = "Theme", Options = names, ConfigKey = "ui_theme",
+            CurrentOption = table.find(names, Window.ThemeName) and Window.ThemeName or nil,
+            Callback = function(v)
+                if ready and v ~= Window.ThemeName then Window:SetTheme(v) end
+            end,
+        })
+
+        local fxNames = { "Theme Default", "Bats", "Snow", "Sakura", "Embers", "Bubbles", "Matrix", "Stars", "Aurora", "Grid", "Fireflies", "Rain", "None" }
+        sec:CreateDropdown({
+            Name = "Background", Options = fxNames, ConfigKey = "ui_background",
+            CurrentOption = (Window.FxOverride and table.find(fxNames, Window.FxOverride)) and Window.FxOverride or "Theme Default",
+            Callback = function(v)
+                if ready then Window:SetFx(v) end
+            end,
+        })
+        task.defer(function() ready = true end)
+
+        local tests = tab:CreateSection("Preview")
+        tests:CreateButton({
+            Name = "Send test notification",
+            Callback = function()
+                Window:Notify({ Title = "Looking good", Content = "Theme: " .. tostring(Window.ThemeName), Type = "Success" })
+            end,
+        })
+        return tab
+    end
+
+    ---------------------------------------------------------------- lifecycle
+    function Window:Destroy()
+        if Window.Destroyed then return end
+        gui:Destroy()
+    end
+    gui.Destroying:Connect(function()
+        Window.Destroyed = true
+        for _, c in ipairs(conns) do c:Disconnect() end
+        for i, w in ipairs(UI.Windows) do
+            if w == Window then table.remove(UI.Windows, i) break end
+        end
+    end)
+
+    -- intro
+    tween(uiScale, { Scale = scale }, 0.55, Enum.EasingStyle.Back)
+    tween(main, { GroupTransparency = 0 }, 0.3)
+    tween(shadow, { ImageTransparency = 0.5 }, 0.4)
+    task.delay(0.35, playSweep)
+
+    return Window
+end
+
+return UI
