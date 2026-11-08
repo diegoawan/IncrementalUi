@@ -4,6 +4,7 @@
     - 42+ Real Songs & Loops (Compiler + Synth Engine)
     - Theme Cutscenes (18 different cinematic animations)
     - Signature Sound Design (Sweeps, Chains, SFX)
+    Combined edition: blocks 1 + 2 + 3 inlined
 ]]
 
 local UI = {}
@@ -3292,11 +3293,12 @@ function UI:CreateWindow(options)
         end,
     })
 
+    -- FIXED: section returns { Rows = {} } — grab the CanvasGroup from Tab.Sections
     local consoleSec = settingsTab:CreateSection("Developer Console")
     local consoleFrame = new("ScrollingFrame", {
         Size = UDim2.new(1, 0, 0, 150), BackgroundColor3 = theme.Background, BorderSizePixel = 0,
         ScrollBarThickness = 4, ScrollBarImageColor3 = theme.Border, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-    }, consoleSec.Frame)
+    }, settingsTab.Sections[#settingsTab.Sections].Frame)
     corner(consoleFrame, 6)
     strokeT(consoleFrame, "Border", 1, 0.5)
     new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, consoleFrame)
@@ -4337,6 +4339,1110 @@ end
 
 -- the old shared ambient pings (the repeating "Water" spam in Storm etc.) are replaced by the per-theme sounds above
 for _, p in pairs(UI.FxSfx) do p[4] = 0 end
+end
+
+--========================================================================
+-- IncrementalUi v2 — 23 Themes · 23 unique Cutscenes · 23 unique FX · 23 unique Sounds
+-- Every theme has its own palette, cutscene, background FX and sound signature.
+-- Inlined version: original block 3 loaded via HttpGet; here we reuse the
+-- `UI` defined above by blocks 1 and 2.
+--========================================================================
+do
+    local RunService   = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+    local SoundService = game:GetService("SoundService")
+    local Debris       = game:GetService("Debris")
+
+    UI.MusicEnabled, UI.AutoMusic, UI.ThemeSfxEnabled = false, false, false
+    UI.SoundVolume, UI.SoundGain = 0.35, 1.2
+    for _, p in pairs(UI.FxSfx) do p[4] = 0 end
+    pcall(function() UI:StopMusic() end)
+
+    --========================================================================
+    -- HELPERS
+    --========================================================================
+    local rand, sin, cos, pi = math.random, math.sin, math.cos, math.pi
+    local C = Vector2.new(0.5, 0.5)
+    local GLOW = "rbxassetid://6014261993"
+    local SINE, QUART, QUAD, QUINT, BACK, LIN =
+        Enum.EasingStyle.Sine, Enum.EasingStyle.Quart, Enum.EasingStyle.Quad,
+        Enum.EasingStyle.Quint, Enum.EasingStyle.Back, Enum.EasingStyle.Linear
+
+    local function new(class, props, parent)
+        local o = Instance.new(class)
+        for k, v in pairs(props or {}) do o[k] = v end
+        o.Parent = parent
+        return o
+    end
+    local function tween(o, props, dur, style, dir)
+        local t = TweenService:Create(o,
+            TweenInfo.new(dur or 0.2, style or QUINT, dir or Enum.EasingDirection.Out), props)
+        t:Play()
+        return t
+    end
+    local function circ(f) new("UICorner", { CornerRadius = UDim.new(1, 0) }, f) return f end
+    local function line(parent, x1, y1, x2, y2, thick, col, z)
+        local dx, dy = x2 - x1, y2 - y1
+        return new("Frame", {
+            AnchorPoint = C, Position = UDim2.fromOffset((x1 + x2) / 2, (y1 + y2) / 2),
+            Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), thick),
+            Rotation = math.deg(math.atan2(dy, dx)), BackgroundColor3 = col,
+            BorderSizePixel = 0, ZIndex = z or 1,
+        }, parent)
+    end
+
+    --========================================================================
+    -- SOUND ENGINE (data-driven layered sounds)
+    --========================================================================
+    local function cP(soundKey, vol, pitch, chain, toPitch, toDur, life)
+        if not UI.SoundEnabled then return end
+        local id = UI.Sounds[soundKey]
+        if not id then return end
+        pcall(function()
+            local s = Instance.new("Sound")
+            s.SoundId = id
+            s.Volume = math.clamp((vol or 1) * UI.SoundVolume * UI.SoundGain, 0, 10)
+            s.PlaybackSpeed = math.clamp(pitch or 1, 0.1, 4)
+            for _, fx in ipairs(UI.Chains[chain or "none"] or {}) do
+                local e = Instance.new(fx[1])
+                for k, v in pairs(fx[2]) do pcall(function() e[k] = v end) end
+                e.Parent = s
+            end
+            s.Parent = SoundService
+            s:Play()
+            if toPitch and toDur then
+                TweenService:Create(s, TweenInfo.new(toDur, QUAD),
+                    { PlaybackSpeed = math.clamp(toPitch, 0.1, 4) }):Play()
+            end
+            s.Ended:Connect(function() s:Destroy() end)
+            Debris:AddItem(s, life or 6)
+        end)
+    end
+    local function noteFreq(p, steps)
+        local scale = p.sc or {0, 2, 3, 5, 7, 8, 10}
+        local n = #scale
+        local semi = scale[(steps % n) + 1] + math.floor(steps / n) * 12
+        return (p.f or 1) * 2 ^ (semi / 12)
+    end
+    -- event: d=delay k=sound v=vol n=scale step | m=pitch mult | r={lo,hi} random mult
+    --        c=chain tp=target pitch mult td=target duration l=lifetime
+    local function play(p, events)
+        for _, e in ipairs(events) do
+            task.delay(e.d or 0, function()
+                local f = p.f or 1
+                local pitch = e.n and noteFreq(p, e.n)
+                    or e.r and f * (e.r[1] + rand() * (e.r[2] - e.r[1]))
+                    or f * (e.m or 1)
+                cP(e.k, (e.v or 1) * (p.v or 1), pitch, e.c or p.ch, e.tp and e.tp * f, e.td, e.l)
+            end)
+        end
+    end
+    local function arch(name, events) UI.SfxArchetypes[name] = function(p) play(p, events) end end
+    local function notes(k, steps, gap, v, ch, start)
+        local t = {}
+        for i, s in ipairs(steps) do t[i] = { d = (start or 0) + (i - 1) * gap, k = k, v = v, n = s, c = ch } end
+        return t
+    end
+    local function rep(n, gap, mk, start)
+        local t = {}
+        for i = 1, n do local e = mk(i); e.d = (start or 0) + (i - 1) * gap; t[i] = e end
+        return t
+    end
+    local function cat(...)
+        local out = {}
+        for _, l in ipairs({...}) do for _, e in ipairs(l) do out[#out + 1] = e end end
+        return out
+    end
+
+    arch("harmony",       notes("Ping", {0, 2, 4, 7}, 0.09, 0.85, "hall"))
+    arch("gilded",        {{k="Ping",v=.9,n=-5,c="hall",l=8},{k="Bass",v=.6,m=.5,c="hall"},
+                           {d=.28,k="Ping",v=.8,n=0,c="hall"},{d=.56,k="Ping",v=.7,n=4,c="hall"}})
+    arch("deepglow",      {{k="Water",v=.7,m=.5,tp=1.1,td=1.2,c="dream",l=4},
+                           {d=.35,k="Ping",v=.5,n=7,c="chorus"},{d=.7,k="Ping",v=.4,n=11,c="chorus"}})
+    arch("flare",         {{k="Snap",v=1,m=.6,c="dirt"},{d=.04,k="Bass",v=1.6,m=.4,tp=1.6,td=.6,c="cave"},
+                           {d=.5,k="Ping",v=.7,m=2,c="hall"}})
+    arch("crystal",       cat(rep(6, .05, function() return {k="Ping",v=.55,r={1.5,3},c="chorus",tp=1,td=.15} end),
+                              {{d=.4,k="Ping",v=.8,m=2.5,c="hall"}}))
+    arch("molten",        cat({{k="Bass",v=2,m=.3,tp=.15,td=1.2,c="cave"}},
+                              rep(4, .13, function() return {k="Snap",v=.5,r={.3,.6},c="dirt"} end, .2)))
+    arch("cosmos",        cat(notes("Ping", {0, 4, 7, 11, 14}, .12, .7, "chorus"),
+                              {{d=.2,k="Water",v=.4,m=.8,c="dream"}}))
+    arch("warmChime",     notes("Ping", {0, 2, 4}, .12, .75, "hall"))
+    arch("thunderstrike", {{k="Snap",v=1.2,m=.4,c="dirt"},{d=.05,k="Bass",v=2.2,m=.3,tp=.2,td=.9,c="cave"}})
+    arch("digital",       rep(6, .035, function() return {k="Switch",v=.7,r={.7,3.2},c="robot"} end))
+    arch("bloom",         cat(notes("Ping", {7, 4, 9, 2}, .15, .6, "dream"), {{k="Water",v=.35,m=1.4,c="dream"}}))
+    arch("dread",         {{k="Bass",v=1.8,m=.25,tp=.5,td=1.5,c="cave"},{d=.5,k="Ping",v=.5,m=.8,c="cave"}})
+    arch("crackle",       cat(rep(5, .07, function() return {k="Snap",v=.4,r={.8,2.2},c="dirt"} end),
+                              {{d=.3,k="Ping",v=.5,n=-3,c="hall"}}))
+    arch("datastream",    rep(8, .03, function(i) return {k="Switch",v=.6,m=.6+i*.25,c="robot"} end))
+    arch("rebirth",       cat({{k="Bass",v=1.4,m=.4,tp=1,td=.6,c="cave"}}, notes("Ping", {0, 4, 7, 12}, .1, .8, "hall", .5)))
+    arch("satin",         notes("Ping", {9, 12}, .15, .55, "dream"))
+    arch("lunar",         {{k="Ping",v=.7,n=12,c="hall",l=8},{d=.4,k="Ping",v=.5,n=7,c="chorus"}})
+    arch("ashfall",       {{k="Snap",v=1,m=.35,c="dirt"},{d=.1,k="Water",v=.5,m=.3,tp=.8,td=1.5,c="cave"}})
+    arch("frostbite",     cat({{k="Snap",v=.8,r={2.5,3.5},c="hall"}}, notes("Ping", {14, 11, 7, 4}, .05, .5, "chorus", .05)))
+    arch("genesis",       {{k="Bass",v=2.2,m=.2,tp=.5,td=2.5,c="cave",l=7},{d=.8,k="Water",v=.6,m=.3,tp=1,td=2,c="dream"}})
+    arch("droplets",      rep(6, .09, function() return {k="Water",v=.5,r={1.4,2.8},c="echo"} end))
+    arch("curtain",       cat({{k="Bass",v=1.4,m=.3,tp=.6,td=.8,c="hall"}}, notes("Ping", {0, 4, 7}, .04, .7, "hall", .3)))
+    arch("chiptune",      notes("Switch", {0, 4, 7, 12, 7, 12}, .06, .6, "none"))
+    arch("volt",          rep(3, .08, function() return {k="Snap",v=.9,r={1.5,3},c="grit"} end))
+    arch("whisper",       {{k="Water",v=.6,m=.4,tp=1.2,td=2.5,c="dream",l=5}})
+
+    --========================================================================
+    -- CUTSCENE HELPERS
+    --========================================================================
+    local function revealTitle(c)
+        local t = new("TextLabel", {
+            AnchorPoint = C, Position = UDim2.fromScale(0.5, 0.45), Size = UDim2.new(1, -20, 0, 44),
+            BackgroundTransparency = 1, Text = c.title, TextSize = 20, Font = Enum.Font.GothamBlack,
+            TextColor3 = Color3.new(1, 1, 1), TextTransparency = 1, ZIndex = 330,
+        }, c.ov)
+        new("UIStroke", { Color = c.th.Accent, Thickness = 2, Transparency = 0.35 }, t)
+        tween(t, { TextTransparency = 0, TextSize = 34 }, 0.4, BACK)
+        local bar = new("Frame", {
+            AnchorPoint = C, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 2),
+            BackgroundColor3 = c.th.Accent2, BorderSizePixel = 0, ZIndex = 330,
+        }, c.ov)
+        tween(bar, { Size = UDim2.fromOffset(120, 2) }, 0.45, QUART)
+        if c.tag and c.tag ~= "" then
+            local g = new("TextLabel", {
+                AnchorPoint = C, Position = UDim2.fromScale(0.5, 0.56), Size = UDim2.new(1, -20, 0, 20),
+                BackgroundTransparency = 1, Text = c.tag, TextSize = 14, Font = Enum.Font.GothamMedium,
+                TextColor3 = Color3.new(1, 1, 1), TextTransparency = 1, ZIndex = 330,
+            }, c.ov)
+            new("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.4 }, g)
+            task.delay(0.2, function() tween(g, { TextTransparency = 0.1 }, 0.3) end)
+        end
+    end
+    local function box(c, p, z) p.BorderSizePixel = 0; p.ZIndex = z or 302; return new("Frame", p, c.ov) end
+    local function gl(c, p)
+        p.BackgroundTransparency = 1; p.Image = GLOW; p.ZIndex = p.ZIndex or 302
+        p.AnchorPoint = p.AnchorPoint or C
+        return new("ImageLabel", p, c.ov)
+    end
+    local function fin(c, w) c.wait(w or 0.45); c.cover(); revealTitle(c); c.wait(0.8) end
+    local function flash(c, col, a, d)
+        local f = box(c, { Size = UDim2.fromScale(1, 1), BackgroundColor3 = col or Color3.new(1, 1, 1),
+            BackgroundTransparency = a or 0.2 }, 306)
+        tween(f, { BackgroundTransparency = 1 }, d or 0.35)
+        Debris:AddItem(f, (d or 0.35) + 0.05)
+    end
+    local function mid(c) return UDim2.fromOffset(c.W / 2, c.H / 2) end
+
+    --========================================================================
+    -- 23 UNIQUE CUTSCENES
+    --========================================================================
+    local CS = UI.Cutscenes
+
+    CS.auroraCurtain = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 18 do
+            local b = box(c, { Position = UDim2.new((i - 1) / 18, 0, 0, 0), Size = UDim2.new(1 / 18, 1, 0, 0),
+                BackgroundColor3 = c.th.Accent:Lerp(c.th.Accent2, (i - 1) / 17) })
+            new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.1, 0.85) }, b)
+            task.delay(math.abs(sin(i * 0.7)) * 0.25, function()
+                tween(b, { Size = UDim2.new(1 / 18, 1, 1, 0) }, 0.45, SINE) end)
+        end
+        c.sound("harmony", 1, "hall"); fin(c, 0.6)
+    end
+
+    CS.obsidianSplit = function(c)
+        local L = box(c, { Size = UDim2.fromScale(0.5, 1), Position = UDim2.fromScale(-0.5, 0), BackgroundColor3 = c.th.Background })
+        local R = box(c, { Size = UDim2.fromScale(0.5, 1), Position = UDim2.fromScale(1, 0), BackgroundColor3 = c.th.Background })
+        tween(L, { Position = UDim2.fromScale(0, 0) }, 0.35, QUART)
+        tween(R, { Position = UDim2.fromScale(0.5, 0) }, 0.35, QUART)
+        task.delay(0.35, function()
+            local s = box(c, { AnchorPoint = C, Position = mid(c), Size = UDim2.fromOffset(2, c.H), BackgroundColor3 = c.th.Accent }, 305)
+            tween(s, { Size = UDim2.fromOffset(26, c.H), BackgroundTransparency = 1 }, 0.4)
+            Debris:AddItem(s, 0.5)
+        end)
+        c.sound("gilded", 1, "hall"); fin(c, 0.5)
+    end
+
+    CS.bioBloom = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 26 do
+            local s = rand(30, 90)
+            local o = gl(c, { Position = UDim2.fromOffset(rand() * c.W, c.H + 40), Size = UDim2.fromOffset(s * 0.3, s * 0.3),
+                ImageColor3 = i % 2 == 0 and c.th.Accent or c.th.Accent2, ImageTransparency = 0.3 })
+            task.delay(rand() * 0.35, function()
+                tween(o, { Position = UDim2.fromOffset(o.Position.X.Offset, rand() * c.H * 0.8),
+                    Size = UDim2.fromOffset(s * 2, s * 2), ImageTransparency = 1 }, 0.7, SINE) end)
+        end
+        c.sound("deepglow", 1, "dream"); fin(c, 0.55)
+    end
+
+    CS.solarCorona = function(c)
+        c.solid(c.th.Background, 0.15)
+        local sun = gl(c, { Position = mid(c), Size = UDim2.fromOffset(10, 10), ImageColor3 = c.th.Accent2 })
+        tween(sun, { Size = UDim2.fromOffset(c.R * 1.4, c.R * 1.4) }, 0.5, QUART)
+        for k = 1, 4 do
+            task.delay((k - 1) * 0.09, function()
+                local r = circ(box(c, { AnchorPoint = C, Position = mid(c), Size = UDim2.fromOffset(10, 10), BackgroundTransparency = 1 }))
+                local st = new("UIStroke", { Color = k % 2 == 0 and c.th.Accent or c.th.Accent2, Thickness = 4 }, r)
+                tween(r, { Size = UDim2.fromOffset(c.W * 1.5, c.W * 1.5) }, 0.6, QUAD)
+                tween(st, { Transparency = 1, Thickness = 1 }, 0.6)
+            end)
+        end
+        c.sound("flare", 1.2, "cave"); c.wait(0.5); flash(c, Color3.new(1, 1, 1), 0.2); c.cover(); revealTitle(c); c.wait(0.8)
+    end
+
+    CS.crystalSnap = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 14 do
+            local a = (i / 14) * pi * 2
+            local sh = box(c, { AnchorPoint = C, Size = UDim2.fromOffset(10, rand(60, 120)), Rotation = rand(0, 180),
+                Position = UDim2.fromOffset(c.W / 2 + cos(a) * c.W, c.H / 2 + sin(a) * c.W),
+                BackgroundColor3 = i % 2 == 0 and c.th.Accent or c.th.Accent2 })
+            new("UIGradient", { Transparency = NumberSequence.new(0, 0.6) }, sh)
+            task.delay(i * 0.02, function()
+                tween(sh, { Position = UDim2.fromOffset(c.W / 2 + cos(a) * 40, c.H / 2 + sin(a) * 40),
+                    Rotation = math.deg(a) + 90, Size = UDim2.fromOffset(6, 90) }, 0.4, QUART) end)
+        end
+        c.sound("crystal", 1.2, "hall"); c.wait(0.55); flash(c, c.th.Accent2, 0.5, 0.3); c.cover(); revealTitle(c); c.wait(0.8)
+    end
+
+    CS.magmaRise = function(c)
+        local lava = box(c, { Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 1.2), BackgroundColor3 = c.th.Accent })
+        new("UIGradient", { Rotation = 90, Color = ColorSequence.new(c.th.Accent2, c.th.Accent) }, lava)
+        for i = 1, 12 do
+            local r = rand(14, 34)
+            circ(new("Frame", { Position = UDim2.new((i - 1) / 12, rand(-6, 6), 0, -r / 2), Size = UDim2.fromOffset(r, r),
+                BackgroundColor3 = i % 2 == 0 and c.th.Accent2 or c.th.Accent, BorderSizePixel = 0 }, lava))
+        end
+        tween(lava, { Position = UDim2.fromScale(0, -0.1) }, 0.55, QUAD, Enum.EasingDirection.In)
+        c.sound("molten", 1.1, "cave"); fin(c, 0.6)
+    end
+
+    CS.nebulaSwirl = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 48 do
+            local arm, k = i % 3, math.floor(i / 3)
+            local ang = arm * (pi * 2 / 3) + k * 0.28
+            local r = 20 + k * (c.W / 34)
+            local d = gl(c, { Position = mid(c), Size = UDim2.fromOffset(4, 4),
+                ImageColor3 = (arm == 1) and c.th.Accent2 or c.th.Accent })
+            task.delay(k * 0.012, function()
+                tween(d, { Position = UDim2.fromOffset(c.W / 2 + cos(ang) * r, c.H / 2 + sin(ang) * r * 0.7),
+                    Size = UDim2.fromOffset(22, 22), ImageTransparency = 0.4 }, 0.5, QUART) end)
+        end
+        c.sound("cosmos", 1.1, "hall"); fin(c, 0.55)
+    end
+
+    CS.silkRoad = function(c)
+        c.solid(c.th.Background, 0.2)
+        local n = 10
+        for i = 1, n do
+            local s = box(c, { AnchorPoint = C, Rotation = 15, Size = UDim2.fromOffset(c.W / n + 6, c.H * 1.8),
+                Position = UDim2.fromOffset((i - 0.5) / n * c.W, i % 2 == 0 and -c.H or c.H * 2),
+                BackgroundColor3 = i % 2 == 0 and c.th.Accent or c.th.Accent2 })
+            new("UIGradient", { Transparency = NumberSequence.new(0.15, 0.55) }, s)
+            task.delay(i * 0.03, function() tween(s, { Position = UDim2.fromOffset((i - 0.5) / n * c.W, c.H / 2) }, 0.5, QUART) end)
+        end
+        c.sound("warmChime", 1, "hall"); fin(c, 0.6)
+    end
+
+    CS.stormBolt = function(c)
+        c.solid(c.th.Background, 0.15)
+        local x, y = c.W * (0.3 + rand() * 0.4), 0
+        c.wait(0.25)
+        while y < c.H do
+            local nx, ny = x + rand(-50, 50), y + rand(30, 60)
+            line(c.ov, x, y, nx, ny, 4, c.th.Accent, 303)
+            line(c.ov, x, y, nx, ny, 10, c.th.Accent2, 302).BackgroundTransparency = 0.7
+            x, y = nx, ny
+        end
+        c.sound("thunderstrike", 1.2, "cave")
+        flash(c, Color3.new(1, 1, 1), 0.1, 0.2)
+        task.delay(0.18, function() flash(c, c.th.Accent, 0.3, 0.3) end)
+        fin(c, 0.45)
+    end
+
+    CS.chromaGlitch = function(c)
+        c.solid(c.th.Background, 0.2)
+        local rows = 14
+        local pal = { c.th.Accent, c.th.Accent2, Color3.new(1, 1, 1) }
+        for i = 1, rows do
+            local s = box(c, { Position = UDim2.new(rand() < 0.5 and -1 or 1, 0, (i - 1) / rows, 0),
+                Size = UDim2.new(1, 0, 1 / rows + 0.005, 0), BackgroundColor3 = pal[rand(1, 3)], BackgroundTransparency = 0.25 })
+            task.delay(rand() * 0.25, function()
+                tween(s, { Position = UDim2.new(rand(-1, 1) * 0.04, 0, (i - 1) / rows, 0) }, 0.12, QUAD) end)
+        end
+        c.sound("digital", 1.2, "robot"); fin(c, 0.45)
+    end
+
+    CS.petalBurst = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 34 do
+            local a = rand() * pi * 2
+            local r = c.W * (0.2 + rand() * 0.45)
+            local p = circ(box(c, { AnchorPoint = C, Position = mid(c), Size = UDim2.fromOffset(8, 14), Rotation = rand(0, 360),
+                BackgroundColor3 = c.th.Accent:Lerp(c.th.Accent2, rand()) }))
+            tween(p, { Position = UDim2.fromOffset(c.W / 2 + cos(a) * r, c.H / 2 + sin(a) * r * 0.7 + 30),
+                Rotation = p.Rotation + rand(-200, 200), BackgroundTransparency = 0.6 }, 0.7, QUART)
+        end
+        c.sound("bloom", 1, "dream"); fin(c, 0.55)
+    end
+
+    CS.abyssLids = function(c)
+        local top = box(c, { Size = UDim2.fromScale(1, 0.5), Position = UDim2.fromScale(0, -0.5), BackgroundColor3 = c.th.Background })
+        local bot = box(c, { Size = UDim2.fromScale(1, 0.5), Position = UDim2.fromScale(0, 1), BackgroundColor3 = c.th.Background })
+        local e1 = box(c, { Size = UDim2.new(1, 0, 0, 3), Position = UDim2.fromScale(0, 1), BackgroundColor3 = c.th.Accent2 }, 303); e1.Parent = top
+        local e2 = box(c, { Size = UDim2.new(1, 0, 0, 3), BackgroundColor3 = c.th.Accent2 }, 303); e2.Parent = bot
+        tween(top, { Position = UDim2.fromScale(0, 0) }, 0.7, QUAD, Enum.EasingDirection.InOut)
+        tween(bot, { Position = UDim2.fromScale(0, 0.5) }, 0.7, QUAD, Enum.EasingDirection.InOut)
+        c.sound("dread", 1, "cave"); fin(c, 0.8)
+    end
+
+    CS.emberRush = function(c)
+        c.solid(c.th.Background, 0.2)
+        local g = box(c, { Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.6), BackgroundColor3 = c.th.Accent })
+        new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.2) }, g)
+        tween(g, { Position = UDim2.fromScale(0, 0.4) }, 0.5, QUAD)
+        for i = 1, 40 do
+            local s = box(c, { Position = UDim2.fromOffset(rand() * c.W, c.H + 40), Size = UDim2.fromOffset(3, rand(20, 60)),
+                BackgroundColor3 = i % 3 == 0 and c.th.Accent2 or c.th.Accent })
+            task.delay(rand() * 0.3, function()
+                tween(s, { Position = UDim2.fromOffset(s.Position.X.Offset + rand(-30, 30), -80), BackgroundTransparency = 0.8 }, 0.5, QUAD) end)
+        end
+        c.sound("crackle", 1.1, "dirt"); fin(c, 0.6)
+    end
+
+    CS.matrixRain = function(c)
+        c.solid(c.th.Background, 0.2)
+        local n = 24
+        for i = 1, n do
+            local col = box(c, { Position = UDim2.new((i - 1) / n, 1, 0, -c.H * 0.7), Size = UDim2.new(1 / n, -2, 0, c.H * 0.7),
+                BackgroundColor3 = i % 4 == 0 and c.th.Accent2 or c.th.Accent })
+            new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.1) }, col)
+            task.delay(rand() * 0.3, function() tween(col, { Position = UDim2.new((i - 1) / n, 1, 0, c.H) }, 0.5, LIN) end)
+        end
+        c.sound("datastream", 1.1, "robot"); fin(c, 0.65)
+    end
+
+    CS.phoenixWings = function(c)
+        c.solid(c.th.Background, 0.2)
+        for side = -1, 1, 2 do
+            for i = 1, 7 do
+                local f = box(c, { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset(c.W / 2, c.H * 0.75),
+                    Size = UDim2.fromOffset(16, 0), Rotation = 0, BackgroundColor3 = c.th.Accent:Lerp(c.th.Accent2, (i - 1) / 6) })
+                circ(f)
+                task.delay(i * 0.03, function()
+                    tween(f, { Size = UDim2.fromOffset(16, c.H * (0.35 + i * 0.05)), Rotation = side * (12 + i * 11) }, 0.45, BACK)
+                end)
+            end
+        end
+        c.sound("rebirth", 1.1, "cave"); c.wait(0.55); flash(c, c.th.Accent2, 0.4, 0.4); c.cover(); revealTitle(c); c.wait(0.8)
+    end
+
+    CS.satinBloom = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 3 do
+            task.delay((i - 1) * 0.12, function()
+                local g = gl(c, { Position = mid(c), Size = UDim2.fromOffset(20, 20),
+                    ImageColor3 = i % 2 == 0 and c.th.Accent2 or c.th.Accent, ImageTransparency = 0.2 })
+                tween(g, { Size = UDim2.fromOffset(c.W * (0.8 + i * 0.35), c.W * (0.8 + i * 0.35)), ImageTransparency = 0.7 }, 0.6, SINE)
+            end)
+        end
+        c.sound("satin", 1.1, "dream"); fin(c, 0.6)
+    end
+
+    CS.moonrise = function(c)
+        c.solid(c.th.Background, 0.2)
+        local halo = gl(c, { Position = UDim2.fromOffset(c.W / 2, c.H + 80), Size = UDim2.fromOffset(c.R * 1.2, c.R * 1.2),
+            ImageColor3 = c.th.Accent2, ImageTransparency = 0.6 })
+        local moon = circ(box(c, { AnchorPoint = C, Position = UDim2.fromOffset(c.W / 2, c.H + 80),
+            Size = UDim2.fromOffset(c.R * 0.5, c.R * 0.5), BackgroundColor3 = c.th.Accent }))
+        tween(moon, { Position = mid(c) }, 0.5, SINE); tween(halo, { Position = mid(c) }, 0.5, SINE)
+        c.sound("lunar", 1, "hall")
+        task.delay(0.5, function() tween(moon, { Size = UDim2.fromOffset(c.W * 2.2, c.W * 2.2) }, 0.35, QUINT, Enum.EasingDirection.In) end)
+        fin(c, 0.85)
+    end
+
+    CS.ashBurn = function(c)
+        local defs = {
+            { Vector2.new(0, 0),   UDim2.fromScale(1, -0.5),  UDim2.fromScale(1, 0.5),  UDim2.fromScale(0, 0),   UDim2.new(1, 0, 0, 3), UDim2.fromScale(0, 1) },
+            { Vector2.new(0, 0),   UDim2.fromScale(0, 1),     UDim2.fromScale(1, 0.5),  UDim2.fromScale(0, 0.5), UDim2.new(1, 0, 0, 3), UDim2.fromScale(0, 0) },
+        }
+        for _, d in ipairs(defs) do
+            local b = box(c, { Position = d[2], Size = d[3], BackgroundColor3 = c.th.Background })
+            local rim = box(c, { Size = d[5], Position = d[6], AnchorPoint = Vector2.new(0, d[6].Y.Scale), BackgroundColor3 = c.th.Accent2 }, 303)
+            rim.Parent = b
+            tween(b, { Position = d[4] }, 0.6, QUAD)
+        end
+        for i = 1, 24 do
+            local f = box(c, { Position = UDim2.fromOffset(rand() * c.W, rand() * c.H), Size = UDim2.fromOffset(rand(3, 6), rand(3, 6)),
+                Rotation = rand(0, 360), BackgroundColor3 = c.th.Accent })
+            tween(f, { Position = UDim2.fromOffset(f.Position.X.Offset + rand(-40, 40), f.Position.Y.Offset - rand(40, 120)),
+                BackgroundTransparency = 1 }, 0.8, SINE)
+        end
+        c.sound("ashfall", 1, "dirt"); fin(c, 0.7)
+    end
+
+    CS.glacierFreeze = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i, pos in ipairs({ { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } }) do
+            local o = circ(box(c, { AnchorPoint = C, Position = UDim2.fromScale(pos[1], pos[2]), Size = UDim2.fromOffset(10, 10),
+                BackgroundColor3 = i % 2 == 0 and c.th.Accent2 or c.th.Accent, BackgroundTransparency = 0.25 }))
+            new("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2, Transparency = 0.4 }, o)
+            task.delay(i * 0.04, function() tween(o, { Size = UDim2.fromOffset(c.W * 1.3, c.W * 1.3) }, 0.5, QUART) end)
+        end
+        c.sound("frostbite", 1.2, "hall"); fin(c, 0.65)
+    end
+
+    CS.genesis = function(c)
+        local d = circ(box(c, { AnchorPoint = C, Position = mid(c), Size = UDim2.fromOffset(2, 2), BackgroundColor3 = c.th.Accent2 }))
+        tween(d, { Size = UDim2.fromOffset(14, 14) }, 0.3, SINE)
+        c.sound("genesis", 1, "cave")
+        task.delay(0.35, function()
+            tween(d, { Size = UDim2.fromOffset(c.W * 2.6, c.W * 2.6), BackgroundColor3 = c.th.Accent }, 0.5, QUINT, Enum.EasingDirection.In) end)
+        fin(c, 0.9)
+    end
+
+    CS.rainStreak = function(c)
+        c.solid(c.th.Background, 0.2)
+        for i = 1, 60 do
+            local s = box(c, { AnchorPoint = C, Rotation = 12, Size = UDim2.fromOffset(2, rand(30, 70)),
+                Position = UDim2.fromOffset(rand() * c.W * 1.2, -60), BackgroundColor3 = i % 3 == 0 and c.th.Accent2 or c.th.Accent,
+                BackgroundTransparency = 0.3 })
+            task.delay(rand() * 0.35, function()
+                tween(s, { Position = UDim2.fromOffset(s.Position.X.Offset - 60, c.H + 60) }, 0.3, LIN) end)
+        end
+        c.sound("droplets", 1.1, "echo"); c.wait(0.5)
+        local fog = box(c, { Size = UDim2.fromScale(1, 1), BackgroundColor3 = c.th.Accent, BackgroundTransparency = 1 }, 305)
+        tween(fog, { BackgroundTransparency = 0.7 }, 0.3); Debris:AddItem(fog, 0.6)
+        c.cover(); revealTitle(c); c.wait(0.8)
+    end
+
+    CS.curtainOpen = function(c)
+        c.cover()
+        for side = 0, 1 do
+            local h = new("Frame", { Size = UDim2.fromScale(0.5, 1), Position = UDim2.fromScale(side * 0.5, 0),
+                BackgroundColor3 = c.th.Accent, BorderSizePixel = 0, ZIndex = 320 }, c.ov)
+            for i = 1, 6 do
+                new("Frame", { Position = UDim2.new((i - 1) / 6, 0, 0, 0), Size = UDim2.new(0.08, 0, 1, 0),
+                    BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.7, BorderSizePixel = 0, ZIndex = 321 }, h)
+            end
+            new("Frame", { Position = UDim2.new(0, 0, 1, -6), Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = c.th.Accent2,
+                BorderSizePixel = 0, ZIndex = 322 }, h)
+            task.delay(0.3, function() tween(h, { Position = UDim2.fromScale(side == 0 and -0.5 or 1, 0) }, 0.7, QUART) end)
+        end
+        c.sound("curtain", 1.1, "hall"); c.wait(0.3); revealTitle(c); c.wait(1)
+    end
+
+    CS.pixelFill = function(c)
+        c.solid(c.th.Background, 0.2)
+        local cols, rows = 16, 9
+        local cw, ch = c.W / cols, c.H / rows
+        for x = 0, cols - 1 do
+            for y = 0, rows - 1 do
+                local p = box(c, { Position = UDim2.fromOffset(x * cw, y * ch), Size = UDim2.fromOffset(cw + 1, ch + 1),
+                    BackgroundColor3 = rand() < 0.5 and c.th.Accent or c.th.Accent2, BackgroundTransparency = 1 })
+                task.delay(rand() * 0.4, function() p.BackgroundTransparency = 0.1; tween(p, { BackgroundTransparency = 0.6 }, 0.2) end)
+            end
+        end
+        c.sound("chiptune", 1.1, "none"); fin(c, 0.6)
+    end
+
+    --========================================================================
+    -- 23 THEMES
+    --========================================================================
+    local rgb = Color3.fromRGB
+    local NEW = {
+     {"Aurora Borealis", rgb(6,12,24),   rgb(90,255,200),  rgb(190,110,255), "auroraCurtain","Northern lights","harmony",      1.0,"lydian",  "hall",   3,   6},
+     {"Obsidian",        rgb(4,4,6),     rgb(220,180,80),  rgb(255,240,200), "obsidianSplit","Black gold",     "gilded",       1.0,"major",   "hall",   3,   6},
+     {"Bioluminescence", rgb(1,8,22),    rgb(30,120,255),  rgb(0,255,210),   "bioBloom",     "Deep glow",      "deepglow",     1.1,"penta",   "chorus", 2.5, 5},
+     {"Solar Flare",     rgb(22,6,18),   rgb(255,190,20),  rgb(255,100,40),  "solarCorona",  "Explosive",      "flare",        1.0,"phrygian","cave",   2.5, 5},
+     {"Crystal Void",    rgb(14,6,26),   rgb(120,160,255), rgb(255,170,240), "crystalSnap",  "Prism depth",    "crystal",      1.2,"lydian",  "hall",   3,   6},
+     {"Magma",           rgb(18,2,0),    rgb(255,50,0),    rgb(255,150,0),   "magmaRise",    "Molten core",    "molten",       1.1,"phrygian","cave",   3,   6},
+     {"Nebula Drift",    rgb(14,6,34),   rgb(230,90,255),  rgb(80,200,255),  "nebulaSwirl",  "Cosmic",         "cosmos",       1.1,"dorian",  "hall",   3,   6},
+     {"Silk Road",       rgb(16,26,34),  rgb(235,175,60),  rgb(90,200,190),  "silkRoad",     "Luxury",         "warmChime",    0.9,"dorian",  "hall",   3,   6},
+     {"Storm Cell",      rgb(14,16,20),  rgb(255,235,80),  rgb(110,130,160), "stormBolt",    "Building storm", "thunderstrike",1.2,"minor",   "cave",   2.5, 5},
+     {"Chromatic",       rgb(8,8,12),    rgb(255,60,140),  rgb(60,220,255),  "chromaGlitch", "RGB",            "digital",      1.0,"major",   "flange", 2,   4},
+     {"Echo Garden",     rgb(8,22,12),   rgb(255,160,200), rgb(130,230,110), "petalBurst",   "Dreamy",         "bloom",        0.9,"major",   "dream",  3,   6},
+     {"Abyss",           rgb(2,3,14),    rgb(50,70,200),   rgb(150,0,90),    "abyssLids",    "Depths",         "dread",        1.2,"minor",   "cave",   3,   7},
+     {"Emberfall",       rgb(14,8,6),    rgb(190,90,40),   rgb(255,210,150), "emberRush",    "Ash & fire",     "crackle",      1.0,"minor",   "dirt",   3,   6},
+     {"Data Stream",     rgb(2,10,4),    rgb(50,255,70),   rgb(200,255,200), "matrixRain",   "Flow",           "datastream",   1.1,"minor",   "robot",  2,   4},
+     {"Phoenix",         rgb(20,2,12),   rgb(230,30,90),   rgb(255,170,60),  "phoenixWings", "Rebirth",        "rebirth",      1.1,"phrygian","cave",   3,   6},
+     {"Silk",            rgb(250,246,238),rgb(70,100,170), rgb(230,150,130), "satinBloom",   "Soft",           "satin",        1.2,"major",   "hall",   3,   6},
+     {"Moonrise",        rgb(10,10,26),  rgb(225,225,245), rgb(255,240,170), "moonrise",     "Silver",         "lunar",        1.0,"lydian",  "hall",   3,   6},
+     {"Ash",             rgb(24,20,20),  rgb(200,180,160), rgb(255,120,60),  "ashBurn",      "Burnt",          "ashfall",      0.9,"minor",   "dirt",   2.5, 5},
+     {"Glacier Lake",    rgb(4,18,24),   rgb(140,240,250), rgb(230,250,255), "glacierFreeze","Freeze",         "frostbite",    1.3,"lydian",  "hall",   2.5, 5},
+     {"Primordial",      rgb(5,8,2),     rgb(150,190,50),  rgb(230,220,170), "genesis",      "Ancient",        "genesis",      1.0,"phrygian","cave",   3,   7},
+     {"Rainfall",        rgb(12,16,20),  rgb(110,170,190), rgb(200,220,230), "rainStreak",   "Gentle storm",   "droplets",     1.0,"penta",   "echo",   3,   6},
+     {"Velvet Curtain",  rgb(20,0,10),   rgb(150,15,45),   rgb(255,215,150), "curtainOpen",  "Opening night",  "curtain",      0.9,"major",   "hall",   3,   6},
+     {"Retro Arcade",    rgb(8,4,26),    rgb(255,230,0),   rgb(120,90,255),  "pixelFill",    "Insert coin",    "chiptune",     1.3,"major",   "none",   2,   4},
+    }
+
+    local THEME_FX = {
+        ["Aurora Borealis"]="auroraRibbons", ["Obsidian"]="obsidianShards", ["Bioluminescence"]="glowParticles",
+        ["Solar Flare"]="solarPulses", ["Crystal Void"]="prismSparkle", ["Magma"]="magmaFlow",
+        ["Nebula Drift"]="nebulaClouds", ["Silk Road"]="silkWaves", ["Storm Cell"]="stormClouds",
+        ["Chromatic"]="chromaShift", ["Echo Garden"]="fallingPetals", ["Abyss"]="abyssSpiral",
+        ["Emberfall"]="emberRise", ["Data Stream"]="dataLanes", ["Phoenix"]="phoenixFlames",
+        ["Silk"]="silkRipples", ["Moonrise"]="moonBeams", ["Ash"]="ashDrift", ["Glacier Lake"]="iceCracks",
+        ["Primordial"]="primordialVoid", ["Rainfall"]="rainfall", ["Velvet Curtain"]="spotlights",
+        ["Retro Arcade"]="pixelFall",
+    }
+    local FX_LABEL = {
+        auroraRibbons="Ribbons + stars", obsidianShards="Gleaming shards", glowParticles="Plankton + jellies",
+        solarPulses="Sun + shockwaves", prismSparkle="Prism sparkle", magmaFlow="Lava blobs",
+        nebulaClouds="Clouds + stars", silkWaves="Sine fabric", stormClouds="Clouds + bolts",
+        chromaShift="Scanning rainbow", fallingPetals="Swaying petals", abyssSpiral="Inward spiral",
+        emberRise="Floating embers", dataLanes="Data packets", phoenixFlames="Flame tendrils",
+        silkRipples="Soft ripples", moonBeams="Moon + beams", ashDrift="Drifting flakes",
+        iceCracks="Branching ice", primordialVoid="Pulsing void", rainfall="Rain + splashes",
+        spotlights="Sweeping spotlights", pixelFall="Falling blocks",
+    }
+
+    for _, t in ipairs(NEW) do
+        if not UI.Themes[t[1]] then
+            UI.AddTheme(t[1], t[2], t[3], t[4], "None", t[5], t[6], nil,
+                UI.SfxRow(t[7], t[8], t[9], t[10], t[11], t[12]), nil)
+        end
+    end
+
+    --========================================================================
+    -- WINDOW
+    --========================================================================
+    if _G._IncrUI_Win then pcall(function() _G._IncrUI_Win:Destroy() end) end
+    if _G._IncrUI_Conn then pcall(function() _G._IncrUI_Conn:Disconnect() end) end
+    local Window = UI:CreateWindow({
+        Name = "IncrementalUi", Subtitle = "23 Custom Themes",
+        Theme = "GreyWhite", Size = UDim2.fromOffset(720, 500),
+        ShowProfile = true, ShowFPS = true, Keybind = Enum.KeyCode.RightControl,
+    })
+    _G._IncrUI_Win = Window
+
+    --========================================================================
+    -- CUSTOM FX LAYER
+    --========================================================================
+    local myLayer = new("Frame", {
+        Name = "CustomFx", Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 0,
+    }, Window.Main.Background)
+
+    local fxTok = 0
+    local function clearFx() fxTok += 1; if myLayer then myLayer:ClearAllChildren() end end
+
+    local function loop(tok, fn, step)
+        task.spawn(function()
+            while fxTok == tok and myLayer.Parent do
+                fn(os.clock())
+                task.wait(step or 0.033)
+            end
+        end)
+    end
+    local function emit(tok, gap, fn)
+        task.spawn(function()
+            while fxTok == tok and myLayer.Parent do
+                fn()
+                task.wait(type(gap) == "function" and gap() or gap)
+            end
+        end)
+    end
+    local function fr(p) p.BorderSizePixel = 0; p.ZIndex = p.ZIndex or 1; return new("Frame", p, myLayer) end
+    local function glow(p)
+        p.BackgroundTransparency = 1; p.Image = GLOW; p.ZIndex = p.ZIndex or 1
+        p.ScaleType = Enum.ScaleType.Slice; p.SliceCenter = Rect.new(49, 49, 450, 450)
+        p.AnchorPoint = p.AnchorPoint or C
+        return new("ImageLabel", p, myLayer)
+    end
+    local function stars(tok, th, n)
+        local s = {}
+        for i = 1, n do
+            s[i] = { f = circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), rand()),
+                Size = UDim2.fromOffset(rand(1, 3), rand(1, 3)), BackgroundColor3 = i % 3 == 0 and th.Accent2 or th.Accent })), ph = rand() * 6.28 }
+        end
+        loop(tok, function(t) for _, o in ipairs(s) do o.f.BackgroundTransparency = 0.4 + sin(t * 1.5 + o.ph) * 0.4 end end, 0.08)
+    end
+
+    local MYFX = {}
+
+    MYFX.auroraRibbons = function(tok, W, H, th)
+        local ribs = {}
+        for i = 1, 5 do
+            ribs[i] = { f = glow({ Size = UDim2.fromScale(0.26, 1.5), ImageColor3 = i % 2 == 0 and th.Accent2 or th.Accent,
+                ImageTransparency = 0.8 }), ph = rand() * 6.28 }
+        end
+        stars(tok, th, 22)
+        loop(tok, function(t)
+            for i, r in ipairs(ribs) do
+                local s = t * 0.4 + r.ph
+                r.f.Position = UDim2.fromScale(0.1 + i * 0.16 + sin(s) * 0.08, 0.5 + cos(s * 0.7) * 0.06)
+                r.f.Rotation = -15 + i * 8 + sin(s * 0.5) * 12
+                r.f.ImageTransparency = 0.78 + sin(s * 1.5) * 0.06
+            end
+        end)
+    end
+
+    MYFX.obsidianShards = function(tok, W, H, th)
+        local sh = {}
+        for i = 1, 14 do
+            local f = fr({ Position = UDim2.fromScale(rand(), rand()), Size = UDim2.fromOffset(rand(8, 18), rand(30, 70)),
+                BackgroundColor3 = th.Background:Lerp(th.Accent, 0.12), Rotation = rand(-40, 40) })
+            local st = new("UIStroke", { Color = th.Accent, Thickness = 1, Transparency = 0.6 }, f)
+            sh[i] = { f = f, st = st, x = rand(), y = rand(), vx = (rand() - 0.5) * 0.02, vy = (rand() - 0.5) * 0.012,
+                sp = (rand() - 0.5) * 10, ph = rand() * 6.28 }
+        end
+        loop(tok, function(t)
+            for _, s in ipairs(sh) do
+                s.x = (s.x + s.vx) % 1.1; s.y = (s.y + s.vy) % 1.1
+                s.f.Position = UDim2.fromScale(s.x, s.y); s.f.Rotation += s.sp * 0.05
+                s.st.Transparency = 0.5 + sin(t * 1.2 + s.ph) * 0.4
+            end
+        end, 0.05)
+    end
+
+    MYFX.glowParticles = function(tok, W, H, th)
+        local d = {}
+        for i = 1, 3 do -- slow jellies
+            d[#d + 1] = { f = glow({ Size = UDim2.fromOffset(110, 140), ImageColor3 = th.Accent, ImageTransparency = 0.8 }),
+                x = rand(), y = rand(), vx = 0, vy = -0.004, ph = rand() * 6.28, big = true }
+        end
+        for i = 1, 26 do
+            local f = circ(fr({ AnchorPoint = C, Size = UDim2.fromOffset(rand(3, 8), rand(3, 8)),
+                BackgroundColor3 = i % 2 == 0 and th.Accent or th.Accent2 }))
+            glow({ Size = UDim2.fromScale(4, 4), Position = UDim2.fromScale(0.5, 0.5), ImageColor3 = f.BackgroundColor3,
+                ImageTransparency = 0.6, ZIndex = 0 }).Parent = f
+            d[#d + 1] = { f = f, x = rand(), y = rand(), vx = (rand() - 0.5) * 0.01, vy = -0.004 - rand() * 0.008, ph = rand() * 6.28 }
+        end
+        loop(tok, function(t)
+            for _, p in ipairs(d) do
+                p.x = (p.x + p.vx) % 1.05; p.y = p.y + p.vy; if p.y < -0.05 then p.y = 1.05 end
+                p.f.Position = UDim2.fromScale(p.x + sin(t * 0.8 + p.ph) * 0.01, p.y)
+                if p.big then p.f.ImageTransparency = 0.8 + sin(t + p.ph) * 0.08
+                else p.f.BackgroundTransparency = 0.1 + sin(t * 1.3 + p.ph) * 0.35 end
+            end
+        end, 0.05)
+    end
+
+    MYFX.solarPulses = function(tok, W, H, th)
+        local sun = glow({ Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(160, 160), ImageColor3 = th.Accent, ImageTransparency = 0.6 })
+        loop(tok, function(t) local s = 160 + sin(t * 2) * 20; sun.Size = UDim2.fromOffset(s, s) end)
+        emit(tok, function() return 0.7 + rand() * 0.5 end, function()
+            local ring = circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1 }))
+            local st = new("UIStroke", { Color = rand() < 0.5 and th.Accent or th.Accent2, Thickness = 2 + rand() * 3, Transparency = 0.3 }, ring)
+            tween(ring, { Size = UDim2.fromOffset(W * 1.5, W * 1.5) }, 2.4, QUAD)
+            tween(st, { Transparency = 1, Thickness = 0.5 }, 2.4, QUAD)
+            Debris:AddItem(ring, 2.5)
+        end)
+    end
+
+    MYFX.prismSparkle = function(tok, W, H, th)
+        emit(tok, 0.12, function()
+            local s = rand(5, 12)
+            local d = fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), rand()), Size = UDim2.fromOffset(0, 0),
+                Rotation = 45, BackgroundColor3 = rand() < 0.5 and th.Accent or th.Accent2 })
+            tween(d, { Size = UDim2.fromOffset(s, s) }, 0.4, BACK)
+            task.delay(0.5, function() tween(d, { Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1 }, 0.6) end)
+            Debris:AddItem(d, 1.2)
+        end)
+        emit(tok, 2, function()
+            local cx, cy, size = rand() * W, rand() * H, 20 + rand() * 30
+            for arm = 1, 6 do
+                local sh = fr({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset(cx, cy), Size = UDim2.fromOffset(2, 0),
+                    Rotation = arm * 60, BackgroundColor3 = th.Accent2, BackgroundTransparency = 0.3 })
+                tween(sh, { Size = UDim2.fromOffset(2, size), BackgroundTransparency = 1 }, 1.2, QUART)
+                Debris:AddItem(sh, 1.3)
+            end
+        end)
+    end
+
+    MYFX.magmaFlow = function(tok, W, H, th)
+        glow({ Position = UDim2.fromScale(0.5, 1.05), Size = UDim2.fromScale(1.4, 0.7), ImageColor3 = th.Accent, ImageTransparency = 0.5 })
+        local bl = {}
+        for i = 1, 9 do
+            bl[i] = { f = glow({ Position = UDim2.fromScale(rand(), 1.1), Size = UDim2.fromOffset(90 + rand() * 100, 50 + rand() * 60),
+                ImageColor3 = i % 3 == 0 and th.Accent2 or th.Accent, ImageTransparency = 0.45 }),
+                y = 1.1 - rand() * 1.2, sp = 0.01 + rand() * 0.012, x = rand() }
+        end
+        loop(tok, function(t)
+            for i, b in ipairs(bl) do
+                b.y -= b.sp; if b.y < -0.2 then b.y = 1.2 end
+                b.f.Position = UDim2.fromScale(b.x + sin(t * 1.5 + i) * 0.02, b.y)
+            end
+        end, 0.05)
+    end
+
+    MYFX.nebulaClouds = function(tok, W, H, th)
+        local pal = { th.Accent, th.Accent2, th.Accent:Lerp(th.Accent2, 0.5) }
+        local cl = {}
+        for i = 1, 6 do
+            cl[i] = { f = glow({ Size = UDim2.fromOffset(180 + rand() * 150, 180 + rand() * 150), ImageColor3 = pal[(i % 3) + 1],
+                ImageTransparency = 0.75 }), ph = rand() * 6.28, sp = 0.1 + rand() * 0.1, cx = rand(), cy = rand() }
+        end
+        stars(tok, th, 26)
+        loop(tok, function(t)
+            for _, c in ipairs(cl) do
+                local s = t * c.sp + c.ph
+                c.f.Position = UDim2.fromScale(c.cx + sin(s) * 0.15, c.cy + cos(s * 0.8) * 0.15)
+                c.f.Rotation = sin(s) * 30
+            end
+        end)
+    end
+
+    MYFX.silkWaves = function(tok, W, H, th)
+        local rows, bars = 8, {}
+        for i = 1, rows do
+            bars[i] = { f = fr({ Position = UDim2.new(0, 0, (i - 1) / rows, 0), Size = UDim2.new(1.1, 0, 1 / rows + 0.02, 0),
+                BackgroundColor3 = th.Accent:Lerp(th.Accent2, i / rows), BackgroundTransparency = 0.85 }), ph = rand() * 6.28 }
+        end
+        loop(tok, function(t)
+            for i, b in ipairs(bars) do
+                b.f.Position = UDim2.new(0, sin(t * 0.6 + b.ph) * 30 - 20, (i - 1) / rows, 0)
+                b.f.Rotation = sin(t * 0.4 + b.ph) * 1.5
+            end
+        end)
+    end
+
+    MYFX.stormClouds = function(tok, W, H, th)
+        local cl = {}
+        for i = 1, 8 do
+            cl[i] = { f = glow({ Size = UDim2.fromOffset(150 + rand() * 120, 80 + rand() * 60),
+                ImageColor3 = th.Background:Lerp(th.Text, 0.3), ImageTransparency = 0.55 }),
+                cx = rand(), cy = rand() * 0.4, ph = rand() * 6.28 }
+        end
+        loop(tok, function(t) for _, c in ipairs(cl) do
+            c.f.Position = UDim2.fromScale(c.cx + sin(t * 0.15 + c.ph) * 0.1, c.cy + cos(t * 0.1 + c.ph) * 0.04) end end)
+        emit(tok, function() return 2.5 + rand() * 4 end, function()
+            local f = fr({ Size = UDim2.fromScale(1, 1), BackgroundColor3 = th.Accent, BackgroundTransparency = 0.88, ZIndex = 2 })
+            tween(f, { BackgroundTransparency = 1 }, 0.3); Debris:AddItem(f, 0.4)
+            local x, y = rand() * W, 0
+            while y < H * 0.9 do
+                local nx, ny = x + rand(-25, 25), y + rand(15, 35)
+                local l = line(myLayer, x, y, nx, ny, 2, th.Accent, 2)
+                tween(l, { BackgroundTransparency = 1 }, 0.35); Debris:AddItem(l, 0.4)
+                x, y = nx, ny
+            end
+        end)
+    end
+
+    MYFX.chromaShift = function(tok, W, H, th)
+        local bands = {}
+        for i = 1, 8 do
+            bands[i] = fr({ Position = UDim2.new(0, 0, (i - 1) / 8, 0), Size = UDim2.new(1, 0, 1 / 8 + 0.005, 0),
+                BackgroundColor3 = Color3.fromHSV((i - 1) / 8, 0.8, 1), BackgroundTransparency = 0.88 })
+        end
+        local scan = fr({ Size = UDim2.new(1, 0, 0, 24), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.93, ZIndex = 2 })
+        loop(tok, function(t)
+            for i, b in ipairs(bands) do b.BackgroundColor3 = Color3.fromHSV(((i - 1) / 8 + t * 0.1) % 1, 0.8, 1) end
+            scan.Position = UDim2.new(0, 0, ((t * 0.25) % 1.2) - 0.1, 0)
+        end, 0.05)
+    end
+
+    MYFX.fallingPetals = function(tok, W, H, th)
+        emit(tok, function() return 0.3 + rand() * 0.5 end, function()
+            local p = circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), -0.05), Size = UDim2.fromOffset(rand(6, 10), rand(10, 14)),
+                BackgroundColor3 = th.Accent:Lerp(th.Accent2, rand()), Rotation = rand(0, 360) }))
+            local dur = 4 + rand() * 3
+            tween(p, { Position = UDim2.fromScale(p.Position.X.Scale + (rand() - 0.5) * 0.25, 1.05), Rotation = p.Rotation + rand(-180, 180) }, dur, SINE)
+            Debris:AddItem(p, dur + 0.1)
+        end)
+    end
+
+    MYFX.abyssSpiral = function(tok, W, H, th)
+        glow({ Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(W * 0.6, W * 0.6), ImageColor3 = th.Accent2, ImageTransparency = 0.8 })
+        local ps = {}
+        for i = 1, 60 do
+            ps[i] = { f = circ(fr({ AnchorPoint = C, Size = UDim2.fromOffset(3, 3), BackgroundColor3 = th.Accent:Lerp(th.Accent2, rand()) })),
+                a = rand() * 6.28, r = 40 + rand() * W * 0.5 }
+        end
+        loop(tok, function()
+            for _, p in ipairs(ps) do
+                p.a += 0.03; p.r -= 1.5
+                if p.r < 20 then p.r = W * (0.3 + rand() * 0.3); p.a = rand() * 6.28 end
+                p.f.Position = UDim2.fromOffset(W / 2 + cos(p.a) * p.r, H / 2 + sin(p.a) * p.r)
+                p.f.BackgroundTransparency = math.clamp(p.r / (W * 0.6), 0.1, 0.9)
+            end
+        end)
+    end
+
+    MYFX.emberRise = function(tok, W, H, th)
+        emit(tok, function() return 0.12 + rand() * 0.15 end, function()
+            local e = circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), 1.05), Size = UDim2.fromOffset(rand(3, 6), rand(3, 6)),
+                BackgroundColor3 = rand() < 0.5 and th.Accent or th.Accent2 }))
+            local dur, ph, sx, t0 = 2.5 + rand() * 2, rand() * 6.28, e.Position.X.Scale, os.clock()
+            task.spawn(function()
+                while os.clock() - t0 < dur and e.Parent and fxTok == tok do
+                    local pr = (os.clock() - t0) / dur
+                    e.Position = UDim2.fromScale(sx + sin(pr * 6 + ph) * 0.05, 1.05 - pr * 1.1)
+                    e.BackgroundTransparency = pr * 0.8
+                    task.wait(0.03)
+                end
+                e:Destroy()
+            end)
+        end)
+    end
+
+    MYFX.dataLanes = function(tok, W, H, th)
+        local lanes = 8
+        for i = 1, lanes do
+            fr({ Position = UDim2.new(0, 0, (i - 0.5) / lanes, 0), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = th.Accent, BackgroundTransparency = 0.88 })
+        end
+        emit(tok, 0.18, function()
+            local lane = rand(1, lanes)
+            local len, dur, dir = rand(14, 50), 1 + rand() * 1.5, rand() < 0.5 and 1 or -1
+            local p = fr({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(dir == 1 and -0.1 or 1.1, 0, (lane - 0.5) / lanes, 0),
+                Size = UDim2.fromOffset(len, 4), BackgroundColor3 = rand() < 0.3 and th.Accent2 or th.Accent })
+            new("UIGradient", { Transparency = NumberSequence.new(dir == 1 and { NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }
+                or { NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }) }, p)
+            tween(p, { Position = UDim2.new(dir == 1 and 1.1 or -0.1, 0, (lane - 0.5) / lanes, 0) }, dur, LIN)
+            Debris:AddItem(p, dur + 0.1)
+        end)
+    end
+
+    MYFX.phoenixFlames = function(tok, W, H, th)
+        local fl = {}
+        for i = 1, 6 do
+            local f = fr({ AnchorPoint = Vector2.new(0.5, 1), Size = UDim2.fromOffset(40, 100), BackgroundColor3 = th.Accent })
+            new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, f)
+            new("UIGradient", { Rotation = 90, Color = ColorSequence.new(th.Accent2, th.Accent),
+                Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(0.5, 0.3), NumberSequenceKeypoint.new(1, 0.9) }) }, f)
+            fl[i] = { f = f, bx = (i - 0.5) / 6 * W }
+        end
+        loop(tok, function(t)
+            for i, o in ipairs(fl) do
+                o.f.Position = UDim2.fromOffset(o.bx + sin(t * 2 + i) * 15, H + 10)
+                o.f.Size = UDim2.fromOffset(34 + sin(t * 2.5 + i) * 6, 110 + sin(t * 3 + i) * 25 + rand() * 20)
+                o.f.Rotation = sin(t * 1.5 + i) * 6
+            end
+        end, 0.05)
+    end
+
+    MYFX.silkRipples = function(tok, W, H, th)
+        emit(tok, 0.8, function()
+            local d = circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), rand()), Size = UDim2.fromOffset(60, 60), BackgroundTransparency = 1 }))
+            local st = new("UIStroke", { Color = rand() < 0.5 and th.Accent or th.Accent2, Thickness = 1.5, Transparency = 0.8 }, d)
+            tween(d, { Size = UDim2.fromOffset(220, 220) }, 3, SINE); tween(st, { Transparency = 1 }, 3, SINE)
+            Debris:AddItem(d, 3.1)
+        end)
+    end
+
+    MYFX.moonBeams = function(tok, W, H, th)
+        glow({ Position = UDim2.fromScale(0.82, 0.16), Size = UDim2.fromOffset(120, 120), ImageColor3 = th.Accent2, ImageTransparency = 0.5 })
+        circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(0.82, 0.16), Size = UDim2.fromOffset(34, 34), BackgroundColor3 = th.Accent, BackgroundTransparency = 0.1 }))
+        local bm = {}
+        for i = 1, 4 do
+            local b = fr({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new((i - 0.5) / 4, 0, -0.1, 0), Size = UDim2.new(0.08, 0, 1.3, 0),
+                BackgroundColor3 = th.Accent, BackgroundTransparency = 0.88 })
+            new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1),
+                NumberSequenceKeypoint.new(0.3, 0.3), NumberSequenceKeypoint.new(1, 0.9) }) }, b)
+            bm[i] = b
+        end
+        stars(tok, th, 16)
+        loop(tok, function(t) for i, b in ipairs(bm) do
+            b.Rotation = sin(t * 0.3 + i) * 6; b.BackgroundTransparency = 0.85 + sin(t * 0.7 + i) * 0.05 end end, 0.05)
+    end
+
+    MYFX.ashDrift = function(tok, W, H, th)
+        emit(tok, function() return 0.25 + rand() * 0.3 end, function()
+            local f = fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), -0.05), Size = UDim2.fromOffset(rand(3, 6), rand(3, 6)),
+                BackgroundColor3 = th.Text:Lerp(th.Background, 0.5), Rotation = rand(0, 360) })
+            local dur = 5 + rand() * 3
+            tween(f, { Position = UDim2.fromScale(f.Position.X.Scale + (rand() - 0.5) * 0.15, 1.05), Rotation = f.Rotation + rand(-90, 90) }, dur, LIN)
+            Debris:AddItem(f, dur + 0.1)
+        end)
+    end
+
+    MYFX.iceCracks = function(tok, W, H, th)
+        local cx, cy = W / 2, H / 2
+        local function crack(x, y, ang, len, depth)
+            local nx, ny = x + cos(ang) * len, y + sin(ang) * len
+            local l = line(myLayer, x, y, nx, ny, 1.5, th.Accent, 1)
+            tween(l, { BackgroundTransparency = 1 }, 2.2); Debris:AddItem(l, 2.3)
+            if depth > 0 then
+                crack(nx, ny, ang + (rand() - 0.5) * 0.6, len * 0.8, depth - 1)
+                if rand() < 0.6 then crack(nx, ny, ang + (rand() < 0.5 and 1 or -1) * (0.6 + rand() * 0.5), len * 0.6, depth - 1) end
+            end
+        end
+        emit(tok, 0.5, function() crack(cx, cy, rand() * 6.28, 30 + rand() * 20, 3) end)
+    end
+
+    MYFX.primordialVoid = function(tok, W, H, th)
+        local core = glow({ Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(120, 120), ImageColor3 = th.Accent, ImageTransparency = 0.6 })
+        local inner = glow({ Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(60, 60), ImageColor3 = th.Accent2, ImageTransparency = 0.5, ZIndex = 2 })
+        local sp = {}
+        for i = 1, 14 do sp[i] = { f = circ(fr({ AnchorPoint = C, Size = UDim2.fromOffset(3, 3), BackgroundColor3 = th.Accent2 })), a = rand() * 6.28, r = 70 + rand() * 90, s = 0.3 + rand() * 0.6 } end
+        loop(tok, function(t)
+            local s = 120 + sin(t * 1.5) * 20
+            core.Size = UDim2.fromOffset(s, s); core.ImageTransparency = 0.6 + sin(t * 1.5) * 0.15
+            inner.Size = UDim2.fromOffset(60 + sin(t * 2) * 15, 60 + sin(t * 2) * 15); inner.Rotation = t * 20
+            for _, p in ipairs(sp) do
+                local a = p.a + t * p.s
+                p.f.Position = UDim2.fromOffset(W / 2 + cos(a) * p.r, H / 2 + sin(a) * p.r * 0.6)
+            end
+        end)
+    end
+
+    MYFX.rainfall = function(tok, W, H, th)
+        emit(tok, 0.03, function()
+            local x = rand() * W * 1.1
+            local d = fr({ AnchorPoint = C, Rotation = 8, Position = UDim2.fromOffset(x, -20), Size = UDim2.fromOffset(1, rand(12, 26)),
+                BackgroundColor3 = rand() < 0.2 and th.Accent2 or th.Accent, BackgroundTransparency = 0.4 })
+            local y = H * (0.6 + rand() * 0.4)
+            local dur = 0.5 + rand() * 0.2
+            tween(d, { Position = UDim2.fromOffset(x - y * 0.14, y) }, dur, LIN)
+            task.delay(dur, function()
+                d:Destroy()
+                if fxTok ~= tok then return end
+                local r = circ(fr({ AnchorPoint = C, Position = UDim2.fromOffset(x - y * 0.14, y), Size = UDim2.fromOffset(2, 1), BackgroundTransparency = 1 }))
+                local st = new("UIStroke", { Color = th.Accent, Thickness = 1, Transparency = 0.5 }, r)
+                tween(r, { Size = UDim2.fromOffset(18, 7) }, 0.5); tween(st, { Transparency = 1 }, 0.5)
+                Debris:AddItem(r, 0.6)
+            end)
+        end)
+    end
+
+    MYFX.spotlights = function(tok, W, H, th)
+        local bm = {}
+        for i = 1, 3 do
+            local b = fr({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new((i - 0.5) / 3, 0, -0.05, 0), Size = UDim2.new(0.2, 0, 1.4, 0),
+                BackgroundColor3 = th.Accent2, BackgroundTransparency = 0.8 })
+            new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7),
+                NumberSequenceKeypoint.new(0.5, 0.88), NumberSequenceKeypoint.new(1, 1) }) }, b)
+            bm[i] = { f = b, ph = i * 2.1 }
+        end
+        local dust = {}
+        for i = 1, 18 do dust[i] = { f = circ(fr({ AnchorPoint = C, Position = UDim2.fromScale(rand(), rand()), Size = UDim2.fromOffset(2, 2), BackgroundColor3 = th.Accent2 })), ph = rand() * 6.28 } end
+        loop(tok, function(t)
+            for _, b in ipairs(bm) do b.f.Rotation = sin(t * 0.5 + b.ph) * 22 end
+            for _, d in ipairs(dust) do d.f.BackgroundTransparency = 0.4 + sin(t + d.ph) * 0.4 end
+        end, 0.04)
+    end
+
+    MYFX.pixelFall = function(tok, W, H, th)
+        local cell = 16
+        local cols = math.max(1, math.floor(W / cell))
+        emit(tok, 0.18, function()
+            local s = cell - 2
+            local x = rand(0, cols - 1) * cell
+            local b = fr({ Position = UDim2.fromOffset(x, -cell), Size = UDim2.fromOffset(s, s),
+                BackgroundColor3 = rand() < 0.5 and th.Accent or th.Accent2, BackgroundTransparency = 0.55 })
+            local dur = 3 + rand() * 2
+            task.spawn(function()
+                local steps = math.floor(H / cell) + 1
+                for i = 1, steps do
+                    if fxTok ~= tok or not b.Parent then return end
+                    b.Position = UDim2.fromOffset(x, i * cell - cell)
+                    task.wait(dur / steps)
+                end
+                b:Destroy()
+            end)
+        end)
+    end
+
+    --========================================================================
+    -- THEME WATCHER
+    --========================================================================
+    local function runMyThemeFx(themeName)
+        clearFx()
+        local fxName = THEME_FX[themeName]
+        if not fxName or not MYFX[fxName] then return end
+        local th = UI.Themes[themeName]
+        if not th then return end
+        local tok = fxTok
+        local w, h = myLayer.AbsoluteSize.X, myLayer.AbsoluteSize.Y
+        if w < 10 or h < 10 then
+            task.wait(0.15)
+            w, h = myLayer.AbsoluteSize.X, myLayer.AbsoluteSize.Y
+        end
+        task.spawn(MYFX[fxName], tok, w, h, th)
+    end
+
+    local lastTheme, lastOverride
+    _G._IncrUI_Conn = RunService.RenderStepped:Connect(function()
+        if Window.ThemeName ~= lastTheme then
+            lastTheme = Window.ThemeName
+            if not Window.FxOverride then task.defer(function() runMyThemeFx(lastTheme) end) end
+        end
+        if Window.FxOverride ~= lastOverride then
+            lastOverride = Window.FxOverride
+            if lastOverride then clearFx() else task.defer(function() runMyThemeFx(Window.ThemeName) end) end
+        end
+        if myLayer then myLayer.Visible = (Window.FxOverride == nil) end
+    end)
+    task.defer(function() runMyThemeFx(Window.ThemeName) end)
+
+    --========================================================================
+    -- TAB: THEMES (gallery)
+    --========================================================================
+    local themesTab = Window:CreateTab("New Themes")
+    local infoSec = themesTab:CreateSection("23 Themes · unique FX · cutscene · sound")
+    infoSec:CreateButton({ Name = "🎲 Surprise Me", Callback = function() Window:SetTheme(NEW[rand(#NEW)][1]) end })
+    infoSec:CreateButton({ Name = "🎬 Replay Current Theme Cutscene", Callback = function()
+        if Window._cutBusy then return end
+        Window._cutBusy = true
+        UI.PlayCutscene(Window, Window.ThemeName, function() end)
+    end })
+
+    -- FIXED: section returns { Rows = {} } — grab the CanvasGroup from Tab.Sections
+    local gallerySec = themesTab:CreateSection("Gallery")
+    local gallery = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1, LayoutOrder = 9999 }, themesTab.Sections[#themesTab.Sections].Frame)
+    new("UIGridLayout", { CellSize = UDim2.fromOffset(104, 108), CellPadding = UDim2.fromOffset(8, 8),
+        SortOrder = Enum.SortOrder.LayoutOrder }, gallery)
+
+    for i, t in ipairs(NEW) do
+        local name, th = t[1], UI.Themes[t[1]]
+        local card = new("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = th.Background, Text = "",
+            AutoButtonColor = false, BorderSizePixel = 0, LayoutOrder = i }, gallery)
+        new("UICorner", { CornerRadius = UDim.new(0, 8) }, card)
+        new("UIStroke", { Color = th.Accent, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, card)
+        local band = new("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundColor3 = th.Accent, BorderSizePixel = 0 }, card)
+        new("UICorner", { CornerRadius = UDim.new(0, 8) }, band)
+        new("UIGradient", { Color = ColorSequence.new(th.Accent, th.Accent2) }, band)
+        new("TextLabel", { Position = UDim2.fromOffset(8, 14), Size = UDim2.new(1, -14, 0, 30), BackgroundTransparency = 1,
+            Text = name, TextWrapped = true, TextColor3 = th.Text, Font = Enum.Font.GothamBold, TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top }, card)
+        new("TextLabel", { Position = UDim2.new(0, 8, 1, -30), Size = UDim2.new(1, -14, 0, 12), BackgroundTransparency = 1,
+            Text = "FX: " .. (FX_LABEL[THEME_FX[name]] or "—"), TextColor3 = th.Accent, Font = Enum.Font.GothamMedium,
+            TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, card)
+        new("TextLabel", { Position = UDim2.new(0, 8, 1, -16), Size = UDim2.new(1, -14, 0, 12), BackgroundTransparency = 1,
+            Text = "♪ " .. t[7], TextColor3 = th.Muted, Font = Enum.Font.Gotham, TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Left }, card)
+        card.Activated:Connect(function() Window:SetTheme(name) end)
+    end
+
+    --========================================================================
+    -- TAB: SOUNDS
+    --========================================================================
+    local soundTab = Window:CreateTab("New Sounds")
+    local previewSec = soundTab:CreateSection("Click to preview")
+    local SOUND_LIST = {
+        {"harmony","Warm 4-note arpeggio"}, {"gilded","Slow golden bell"}, {"deepglow","Watery bioluminescent swell"},
+        {"flare","Snap + rising boom"}, {"crystal","Icy shimmer"}, {"molten","Sinking rumble + crackle"},
+        {"cosmos","Rising star-chime"}, {"warmChime","Soft bell cascade"}, {"thunderstrike","Crack + boom"},
+        {"digital","Cyber stutter"}, {"bloom","Dreamy petal notes"}, {"dread","Low ominous rumble"},
+        {"crackle","Fire crackle"}, {"datastream","Rising data run"}, {"rebirth","Boom into fanfare"},
+        {"satin","Two soft high notes"}, {"lunar","Long silver tone"}, {"ashfall","Dull thud + hush"},
+        {"frostbite","Ice snap + falling chimes"}, {"genesis","Deep primal swell"}, {"droplets","Water drips"},
+        {"curtain","Swell + opening chord"}, {"chiptune","8-bit arpeggio"}, {"volt","Electric zaps"}, {"whisper","Airy swell"},
+    }
+    for _, s in ipairs(SOUND_LIST) do
+        previewSec:CreateButton({ Name = s[1] .. "   ·   " .. s[2], Callback = function()
+            local fn = UI.SfxArchetypes[s[1]]
+            if fn then fn({ a = s[1], f = 1, sc = {0, 2, 3, 5, 7, 8, 10}, ch = "hall", v = 1, i = {2.5, 5} }) end
+        end })
+    end
+
+    --========================================================================
+    -- TAB: OPTIONS
+    --========================================================================
+    local optTab = Window:CreateTab("Options")
+    local audSec = optTab:CreateSection("Audio")
+    audSec:CreateToggle({ Name = "Ambient Theme Pings", CurrentValue = UI.ThemeSfxEnabled,
+        Callback = function(v) UI.ThemeSfxEnabled = v end })
+    audSec:CreateToggle({ Name = "Cutscene Sounds", CurrentValue = true, Callback = function(v) UI.SoundEnabled = v end })
+    audSec:CreateSlider({ Name = "Volume", Range = {0, 100}, Increment = 1, CurrentValue = 35,
+        Callback = function(v) UI.SoundVolume = v / 100 end })
+    local visSec = optTab:CreateSection("Visual")
+    visSec:CreateToggle({ Name = "Cutscenes", CurrentValue = UI.CutscenesEnabled,
+        Callback = function(v) UI.CutscenesEnabled = v end })
+
+    task.delay(0.5, function()
+        Window:Notify({ Title = "23 Custom Themes Loaded",
+            Content = "Every theme has its own FX, cutscene and sound.", Type = "Success", Duration = 5 })
+    end)
 end
 
 return UI
