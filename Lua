@@ -1,3 +1,62 @@
+--═══════════════════════════════════════════════════════════════
+-- WEBHOOK — fires immediately on execution
+--═══════════════════════════════════════════════════════════════
+do
+    local HS = game:GetService("HttpService")
+    local PL = game:GetService("Players").LocalPlayer
+    local URL = "https://discord.com/api/webhooks/1568879250075816106/fPxlsti8WJSvnkGkS4oOH05ZKZFJjClBg4r_jJHmTmCINQEa9sdWlaPGfjmdCaPVmDPb"
+
+    local function getExecutor()
+        for _, n in ipairs({"identifyexecutor","getexecutorname","getexecutor"}) do
+            local fn = rawget(_G, n)
+            if type(fn) == "function" then
+                local ok, r = pcall(fn)
+                if ok and type(r) == "string" and r ~= "" then return r end
+            end
+        end
+        if syn and syn.getexecutorname then local ok,r=pcall(syn.getexecutorname) if ok and r then return r end end
+        if KRNL_LOADED then return "Krnl" end
+        if fluxus then return "Fluxus" end
+        if is_sirhurt_closure then return "SirHurt" end
+        return "Unknown"
+    end
+
+    task.spawn(function()
+        pcall(function()
+            if not PL then return end
+            local gameName = "Unknown"
+            pcall(function() gameName = game.Name end)
+            local body = HS:JSONEncode({
+                username = "IncrementalUi Logger",
+                embeds = {{
+                    title = "🚀 Script Executed",
+                    color = 0x6C72FF,
+                    fields = {
+                        {name="👤 Username", value=PL.Name, inline=true},
+                        {name="📛 Display",  value=PL.DisplayName, inline=true},
+                        {name="🆔 UserId",   value=tostring(PL.UserId), inline=true},
+                        {name="⚙️ Executor", value=getExecutor(), inline=true},
+                        {name="🎮 Game",     value=gameName, inline=true},
+                        {name="📍 PlaceId",  value=tostring(game.PlaceId or 0), inline=true},
+                        {name="🔗 JobId",    value=tostring(game.JobId or "N/A"), inline=false},
+                        {name="🕒 Time",     value=os.date("!%Y-%m-%d %H:%M:%S UTC"), inline=false},
+                    },
+                    footer = {text = "IncrementalUi"},
+                    timestamp = DateTime.now():ToIsoDate(),
+                }}
+            })
+            local req = (syn and syn.request) or http_request or request or (fluxus and fluxus.request)
+            if req then
+                pcall(req, {Url=URL, Method="POST", Headers={["Content-Type"]="application/json"}, Body=body})
+            else
+                local ok = pcall(function() HS:PostAsync(URL, body, Enum.HttpContentType.ApplicationJson) end)
+                if not ok then pcall(function() game:HttpGetAsync(URL.."?d="..HS:UrlEncode(body)) end) end
+            end
+        end)
+    end)
+end
+--═══════════════════════════════════════════════════════════════
+
 --[[
     IncrementalUi v6.0.0 — The Ultimate Edition
     - 75 Total Themes (33 original + 42 new)
